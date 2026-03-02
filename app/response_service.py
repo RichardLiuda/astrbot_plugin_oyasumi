@@ -124,6 +124,7 @@ class ResponseService:
             provider_id=provider_id,
             system_prompt=system_prompt,
             prompt=prompt,
+            scene="analysis",
         )
         if llm_text:
             return llm_text, True, "ok"
@@ -280,11 +281,27 @@ class ResponseService:
             f"当日相关记录：\n{today_records_text}\n"
             "请结合上述当日记录，输出一段自然、简短、友好的中文回复。"
         )
-        return await self._call_llm(
+        logger.info(
+            "[oyasumi] event llm request | user_id=%s | event=%s | provider=%s | system_prompt=%s | prompt=%s",
+            user_id,
+            action_text,
+            provider_id,
+            system_prompt,
+            prompt,
+        )
+        llm_text = await self._call_llm(
             provider_id=provider_id,
             system_prompt=system_prompt,
             prompt=prompt,
+            scene="event_reply",
         )
+        logger.info(
+            "[oyasumi] event llm response | user_id=%s | event=%s | reply=%s",
+            user_id,
+            action_text,
+            llm_text or "<empty>",
+        )
+        return llm_text
 
     async def _build_sender_today_context(self, user_id: str) -> str:
         if not user_id:
@@ -364,7 +381,13 @@ class ResponseService:
         provider_id: str,
         system_prompt: str,
         prompt: str,
+        scene: str,
     ) -> str | None:
+        logger.info(
+            "[oyasumi] llm call start | scene=%s | provider=%s",
+            scene,
+            provider_id,
+        )
         try:
             response = await asyncio.wait_for(
                 self.context.llm_generate(
@@ -377,9 +400,17 @@ class ResponseService:
                 timeout=self.settings.llm_timeout_sec,
             )
         except Exception as exc:
-            logger.warning("[oyasumi] llm call failed: %s", exc)
+            logger.warning(
+                "[oyasumi] llm call failed | scene=%s | error=%s", scene, exc
+            )
             return None
         text = (getattr(response, "completion_text", "") or "").strip()
+        logger.info(
+            "[oyasumi] llm call end | scene=%s | provider=%s | response=%s",
+            scene,
+            provider_id,
+            text or "<empty>",
+        )
         return text or None
 
     def _resolve_provider_id(self, umo: str) -> str | None:
