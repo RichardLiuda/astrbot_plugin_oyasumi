@@ -1,0 +1,165 @@
+{
+  "enabled": {
+    "type": "bool",
+    "description": "是否启用插件",
+    "default": true
+  },
+  "reply_mode": {
+    "type": "string",
+    "description": "回复模式：static 或 llm",
+    "default": "static",
+    "hint": "static=固定文本回复，llm=大模型生成回复"
+  },
+  "good_morning_patterns_text": {
+    "type": "string",
+    "description": "早安正则规则（每行一条）",
+    "default": "^(早安|早上好|我醒了).*$",
+    "hint": "支持 Python 正则，多条规则请换行"
+  },
+  "good_night_patterns_text": {
+    "type": "string",
+    "description": "晚安正则规则（每行一条）",
+    "default": "^(晚安|睡觉了|我要睡了).*$",
+    "hint": "支持 Python 正则，多条规则请换行"
+  },
+  "ignore_case": {
+    "type": "bool",
+    "description": "正则匹配时忽略大小写",
+    "default": true
+  },
+  "normalize_width": {
+    "type": "bool",
+    "description": "匹配前是否执行全角半角归一化",
+    "default": true
+  },
+  "morning_static_reply": {
+    "type": "string",
+    "description": "早安固定回复模板",
+    "default": "早安呀，{user_name}。你这次睡了约 {duration_minutes} 分钟，要元气满满哦，喵~"
+  },
+  "night_static_reply": {
+    "type": "string",
+    "description": "晚安固定回复模板",
+    "default": "晚安啦，{user_name}。已经帮你记下入睡时间 {sleep_time}，做个好梦喵~"
+  },
+  "orphan_morning_reply": {
+    "type": "string",
+    "description": "仅早安（无可闭合晚安）回复模板",
+    "default": "收到早安啦，但还没找到可闭合的晚安记录。可以用“/作息 修正”补录一下，喵~"
+  },
+  "duplicate_night_reply": {
+    "type": "string",
+    "description": "重复晚安回复模板",
+    "default": "你当前已经有进行中的睡眠记录了，这次按策略处理好啦，喵~"
+  },
+  "llm_enabled": {
+    "type": "bool",
+    "description": "是否启用早晚安事件的大模型回复",
+    "default": false,
+    "hint": "仅影响早安/晚安事件回复；“作息 分析”和 WebUI 分析始终尝试使用大模型"
+  },
+  "llm_provider_id": {
+    "_special": "select_provider",
+    "type": "string",
+    "description": "大模型提供商 ID（可留空）",
+    "default": ""
+  },
+  "llm_fallback_to_static": {
+    "type": "bool",
+    "description": "早晚安事件的大模型回复失败时回退为固定回复",
+    "default": true
+  },
+  "llm_temperature": {
+    "type": "float",
+    "description": "大模型温度参数",
+    "default": 0.4
+  },
+  "llm_max_tokens": {
+    "type": "int",
+    "description": "大模型最大输出 token",
+    "default": 300
+  },
+  "llm_timeout_sec": {
+    "type": "int",
+    "description": "大模型超时时间（秒）",
+    "default": 20
+  },
+  "llm_prompt_morning": {
+    "type": "string",
+    "description": "早安 LLM 提示词",
+    "default": "你是温柔的作息助手。请结合本次睡眠记录给出简短问候与作息建议。"
+  },
+  "llm_prompt_night": {
+    "type": "string",
+    "description": "晚安 LLM 提示词",
+    "default": "你是温柔的作息助手。请根据记录到的入睡事件给出简短晚安建议。"
+  },
+  "llm_prompt_analysis": {
+    "type": "string",
+    "description": "统计分析 LLM 提示词",
+    "default": "你是二次元群聊里的作息观察员。请严格遵循当前会话人格（persona）来表达，再基于睡眠统计输出 Markdown，包含「## 作息播报」「## 规律雷达」「## 明日行动清单」三个部分，语气轻松友好、带少量 ACG 风格，不油腻；给出3条可执行建议。",
+    "hint": "建议输出 Markdown，便于 WebUI 渲染。"
+  },
+  "day_boundary_hour": {
+    "type": "int",
+    "description": "统计日界线小时（0-12）",
+    "default": 6
+  },
+  "duplicate_night_policy": {
+    "type": "string",
+    "description": "重复晚安策略：ignore / update_open / create_new",
+    "default": "ignore"
+  },
+  "orphan_morning_policy": {
+    "type": "string",
+    "description": "孤立早安策略：warn_only / create_closed_session",
+    "default": "warn_only"
+  },
+  "auto_fill_default_hours": {
+    "type": "int",
+    "description": "自动补全会话默认睡眠时长（小时）",
+    "default": 8
+  },
+  "allow_user_edit_self": {
+    "type": "bool",
+    "description": "是否允许用户修正自己的会话",
+    "default": true
+  },
+  "admin_only_global_query": {
+    "type": "bool",
+    "description": "是否仅管理员可查询他人数据",
+    "default": true
+  },
+  "max_open_session_hours": {
+    "type": "int",
+    "description": "进行中会话最大时长（超时后自动废弃）",
+    "default": 20
+  },
+  "include_auto_fill_in_stats": {
+    "type": "bool",
+    "description": "统计是否包含自动补全会话",
+    "default": true
+  },
+  "standalone_webui_enabled": {
+    "type": "bool",
+    "description": "是否启用独立 WebUI（独立端口）",
+    "default": true
+  },
+  "standalone_webui_host": {
+    "type": "string",
+    "description": "独立 WebUI 监听地址",
+    "default": "127.0.0.1",
+    "hint": "如需局域网访问可设置为 0.0.0.0"
+  },
+  "standalone_webui_port": {
+    "type": "int",
+    "description": "独立 WebUI 监听端口",
+    "default": 6196
+  },
+  "standalone_webui_token": {
+    "type": "string",
+    "description": "独立 WebUI 访问令牌（可为空）",
+    "default": "",
+    "hint": "配置后，页面请求需携带该令牌"
+  }
+}
