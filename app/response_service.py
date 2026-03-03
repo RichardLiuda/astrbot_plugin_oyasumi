@@ -279,7 +279,9 @@ class ResponseService:
             f"时长（分钟）：{result.duration_minutes if result.duration_minutes is not None else '-'}\n"
             f"补充说明：{result.message_hint}\n"
             f"当日相关记录：\n{today_records_text}\n"
-            "请结合上述当日记录，输出一段自然、简短、友好的中文回复。"
+            "请结合上述当日记录，仅输出一段中文短回复：1-2句、总字数不超过50字。"
+            "不要分点、不要标题、不要代码块、不要换行。"
+            "语气温柔可爱，最多带一次“喵~”。"
         )
         logger.info(
             "[oyasumi] event llm request | user_id=%s | event=%s | provider=%s | system_prompt=%s | prompt=%s",

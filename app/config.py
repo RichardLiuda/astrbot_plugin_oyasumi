@@ -187,11 +187,11 @@ def load_plugin_settings(
         llm_timeout_sec=max(5, _as_int(raw.get("llm_timeout_sec"), 20)),
         llm_prompt_morning=_as_str(
             raw.get("llm_prompt_morning"),
-            "你是温柔的作息助手。请结合本次睡眠记录给出简短问候与作息建议。",
+            "你是温柔可爱的作息助手。请基于早安记录回复1-2句，50字内，不分点不换行；给出问候+1条轻建议，可带一次“喵~”。",
         ),
         llm_prompt_night=_as_str(
             raw.get("llm_prompt_night"),
-            "你是温柔的作息助手。请根据记录到的入睡事件给出简短晚安建议。",
+            "你是温柔可爱的作息助手。请基于晚安记录回复1-2句，50字内，不分点不换行；给出晚安+1条轻建议，可带一次“喵~”。",
         ),
         llm_prompt_analysis=_as_str(
             raw.get("llm_prompt_analysis"),
