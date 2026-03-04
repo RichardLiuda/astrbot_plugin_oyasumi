@@ -496,3 +496,313 @@ class OyasumiRepository:
             ORDER BY stat_date ASC
         """
         return await self._fetch_all(sql, tuple(params))
+
+    async def query_daily_group_metrics(
+        self,
+        *,
+        start_date: str,
+        end_date: str,
+        day_boundary_hour: int,
+        include_auto_fill: bool,
+    ) -> list[dict[str, Any]]:
+        auto_fill_filter_sql = ""
+        params: list[Any] = [day_boundary_hour]
+        if not include_auto_fill:
+            auto_fill_filter_sql = " AND is_auto_filled = 0 "
+        params.extend([start_date, end_date])
+        sql = f"""
+            SELECT
+                stat_date,
+                SUM(duration_minutes) AS total_minutes,
+                COUNT(1) AS session_count,
+                COUNT(DISTINCT user_id) AS active_user_count
+            FROM (
+                SELECT
+                    user_id,
+                    CASE
+                        WHEN CAST(strftime('%H', sleep_time) AS INTEGER) < ?
+                        THEN date(sleep_time, '-1 day')
+                        ELSE date(sleep_time)
+                    END AS stat_date,
+                    CAST((JULIANDAY(wake_time) - JULIANDAY(sleep_time)) * 24 * 60 AS INTEGER) AS duration_minutes
+                FROM sleep_session
+                WHERE status = 'closed'
+                  AND sleep_time IS NOT NULL
+                  AND wake_time IS NOT NULL
+                  AND wake_time >= sleep_time
+                  {auto_fill_filter_sql}
+            ) t
+            WHERE stat_date BETWEEN ? AND ?
+            GROUP BY stat_date
+            ORDER BY stat_date ASC
+        """
+        return await self._fetch_all(sql, tuple(params))
+
+    async def query_active_user_count(
+        self,
+        *,
+        start_date: str,
+        end_date: str,
+        day_boundary_hour: int,
+        include_auto_fill: bool,
+    ) -> int:
+        auto_fill_filter_sql = ""
+        params: list[Any] = [day_boundary_hour]
+        if not include_auto_fill:
+            auto_fill_filter_sql = " AND is_auto_filled = 0 "
+        params.extend([start_date, end_date])
+        sql = f"""
+            SELECT COUNT(DISTINCT user_id) AS cnt
+            FROM (
+                SELECT
+                    user_id,
+                    CASE
+                        WHEN CAST(strftime('%H', sleep_time) AS INTEGER) < ?
+                        THEN date(sleep_time, '-1 day')
+                        ELSE date(sleep_time)
+                    END AS stat_date
+                FROM sleep_session
+                WHERE status = 'closed'
+                  AND sleep_time IS NOT NULL
+                  AND wake_time IS NOT NULL
+                  AND wake_time >= sleep_time
+                  {auto_fill_filter_sql}
+            ) t
+            WHERE stat_date BETWEEN ? AND ?
+        """
+        row = await self._fetch_one(sql, tuple(params))
+        return int((row or {}).get("cnt", 0))
+
+    async def query_hourly_distribution(
+        self,
+        *,
+        event: str,
+        user_id: str | None,
+        start_date: str,
+        end_date: str,
+        day_boundary_hour: int,
+        include_auto_fill: bool,
+    ) -> list[dict[str, Any]]:
+        column = "sleep_time" if event == "sleep" else "wake_time"
+        user_filter_sql = ""
+        auto_fill_filter_sql = ""
+        params: list[Any] = [day_boundary_hour, day_boundary_hour]
+        if user_id:
+            user_filter_sql = " AND user_id = ? "
+            params.append(user_id)
+        if not include_auto_fill:
+            auto_fill_filter_sql = " AND is_auto_filled = 0 "
+        params.extend([start_date, end_date])
+        sql = f"""
+            SELECT
+                stat_date,
+                hour,
+                COUNT(1) AS count
+            FROM (
+                SELECT
+                    CASE
+                        WHEN CAST(strftime('%H', {column}) AS INTEGER) < ?
+                        THEN date({column}, '-1 day')
+                        ELSE date({column})
+                    END AS stat_date,
+                    CASE
+                        WHEN CAST(strftime('%H', {column}) AS INTEGER) < ?
+                        THEN CAST(strftime('%H', {column}) AS INTEGER) + 24
+                        ELSE CAST(strftime('%H', {column}) AS INTEGER)
+                    END AS hour
+                FROM sleep_session
+                WHERE status = 'closed'
+                  AND sleep_time IS NOT NULL
+                  AND wake_time IS NOT NULL
+                  AND wake_time >= sleep_time
+                  AND {column} IS NOT NULL
+                  {user_filter_sql}
+                  {auto_fill_filter_sql}
+            ) t
+            WHERE stat_date BETWEEN ? AND ?
+            GROUP BY stat_date, hour
+            ORDER BY stat_date ASC, hour ASC
+        """
+        rows = await self._fetch_all(sql, tuple(params))
+        normalized: list[dict[str, Any]] = []
+        for row in rows:
+            hour = int(row.get("hour") or 0) % 24
+            normalized.append(
+                {
+                    "stat_date": row.get("stat_date"),
+                    "hour": hour,
+                    "count": int(row.get("count") or 0),
+                }
+            )
+        return normalized
+
+    async def query_leaderboard_activity(
+        self,
+        *,
+        start_date: str,
+        end_date: str,
+        day_boundary_hour: int,
+        include_auto_fill: bool,
+        limit: int = 10,
+    ) -> list[dict[str, Any]]:
+        limit = max(1, min(limit, 100))
+        auto_fill_filter_sql = ""
+        params: list[Any] = [
+            day_boundary_hour,
+            start_date,
+            end_date,
+            day_boundary_hour,
+            start_date,
+            end_date,
+            day_boundary_hour,
+            start_date,
+            end_date,
+            limit,
+        ]
+        if not include_auto_fill:
+            auto_fill_filter_sql = " AND is_auto_filled = 0 "
+        sql = f"""
+            WITH event_stats AS (
+                SELECT
+                    user_id,
+                    COUNT(1) AS activity_count,
+                    MAX(event_time) AS last_event_time
+                FROM sleep_event
+                WHERE (
+                    CASE
+                        WHEN CAST(strftime('%H', event_time) AS INTEGER) < ?
+                        THEN date(event_time, '-1 day')
+                        ELSE date(event_time)
+                    END
+                ) BETWEEN ? AND ?
+                GROUP BY user_id
+            ),
+            sleep_stats AS (
+                SELECT
+                    user_id,
+                    SUM(duration_minutes) AS total_sleep_minutes,
+                    COUNT(1) AS closed_count
+                FROM (
+                    SELECT
+                        user_id,
+                        CASE
+                            WHEN CAST(strftime('%H', sleep_time) AS INTEGER) < ?
+                            THEN date(sleep_time, '-1 day')
+                            ELSE date(sleep_time)
+                        END AS stat_date,
+                        CAST((JULIANDAY(wake_time) - JULIANDAY(sleep_time)) * 24 * 60 AS INTEGER) AS duration_minutes
+                    FROM sleep_session
+                    WHERE status = 'closed'
+                      AND sleep_time IS NOT NULL
+                      AND wake_time IS NOT NULL
+                      AND wake_time >= sleep_time
+                      {auto_fill_filter_sql}
+                ) t
+                WHERE stat_date BETWEEN ? AND ?
+                GROUP BY user_id
+            ),
+            users AS (
+                SELECT user_id FROM event_stats
+                UNION
+                SELECT user_id FROM sleep_stats
+            ),
+            latest_events AS (
+                SELECT
+                    user_id,
+                    MAX(event_time) AS latest_event_time
+                FROM sleep_event
+                WHERE (
+                    CASE
+                        WHEN CAST(strftime('%H', event_time) AS INTEGER) < ?
+                        THEN date(event_time, '-1 day')
+                        ELSE date(event_time)
+                    END
+                ) BETWEEN ? AND ?
+                GROUP BY user_id
+            )
+            SELECT
+                u.user_id AS user_id,
+                COALESCE(e.activity_count, 0) AS activity_count,
+                COALESCE(s.total_sleep_minutes, 0) AS total_sleep_minutes,
+                CASE
+                    WHEN COALESCE(s.closed_count, 0) = 0 THEN 0
+                    ELSE CAST(COALESCE(s.total_sleep_minutes, 0) / s.closed_count AS INTEGER)
+                END AS avg_sleep_minutes,
+                l.latest_event_time AS last_event_time
+            FROM users u
+            LEFT JOIN event_stats e ON e.user_id = u.user_id
+            LEFT JOIN sleep_stats s ON s.user_id = u.user_id
+            LEFT JOIN latest_events l ON l.user_id = u.user_id
+            ORDER BY activity_count DESC, total_sleep_minutes DESC, datetime(last_event_time) DESC
+            LIMIT ?
+        """
+        rows = await self._fetch_all(sql, tuple(params))
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            result.append(
+                {
+                    "user_id": row.get("user_id"),
+                    "activity_count": int(row.get("activity_count") or 0),
+                    "total_sleep_minutes": int(row.get("total_sleep_minutes") or 0),
+                    "avg_sleep_minutes": int(row.get("avg_sleep_minutes") or 0),
+                    "last_event_time": row.get("last_event_time"),
+                }
+            )
+        return result
+
+    async def query_user_overview(
+        self,
+        *,
+        user_id: str,
+        start_date: str,
+        end_date: str,
+        day_boundary_hour: int,
+        include_auto_fill: bool,
+    ) -> dict[str, Any]:
+        records = await self.query_closed_sessions_for_stats(
+            user_id=user_id,
+            start_date=start_date,
+            end_date=end_date,
+            day_boundary_hour=day_boundary_hour,
+            include_auto_fill=include_auto_fill,
+        )
+        daily = await self.query_daily_sleep_minutes(
+            user_id=user_id,
+            start_date=start_date,
+            end_date=end_date,
+            day_boundary_hour=day_boundary_hour,
+            include_auto_fill=include_auto_fill,
+        )
+        sleep_rows = await self.query_hourly_distribution(
+            event="sleep",
+            user_id=user_id,
+            start_date=start_date,
+            end_date=end_date,
+            day_boundary_hour=day_boundary_hour,
+            include_auto_fill=include_auto_fill,
+        )
+        wake_rows = await self.query_hourly_distribution(
+            event="wake",
+            user_id=user_id,
+            start_date=start_date,
+            end_date=end_date,
+            day_boundary_hour=day_boundary_hour,
+            include_auto_fill=include_auto_fill,
+        )
+        user_sleep_rows = [row for row in sleep_rows if row.get("stat_date")]
+        user_wake_rows = [row for row in wake_rows if row.get("stat_date")]
+        open_count = await self.get_open_session_count(user_id=user_id)
+        orphan_count = await self.count_orphan_morning_events(
+            user_id=user_id,
+            start_date=start_date,
+            end_date=end_date,
+            day_boundary_hour=day_boundary_hour,
+        )
+        return {
+            "records": records,
+            "daily_series": daily,
+            "sleep_heatmap": user_sleep_rows,
+            "wake_heatmap": user_wake_rows,
+            "open_session_count": open_count,
+            "orphan_morning_count": orphan_count,
+        }

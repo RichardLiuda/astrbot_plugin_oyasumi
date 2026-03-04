@@ -381,6 +381,24 @@ class OyasumiPlugin(Star):
             ["GET"],
             "Get latest Oyasumi snapshot",
         )
+        self.context.register_web_api(
+            "/oyasumi/overview",
+            self.webui_overview_api,
+            ["GET"],
+            "Get group overview data for Oyasumi",
+        )
+        self.context.register_web_api(
+            "/oyasumi/leaderboard",
+            self.webui_leaderboard_api,
+            ["GET"],
+            "Get activity leaderboard data for Oyasumi",
+        )
+        self.context.register_web_api(
+            "/oyasumi/user_insight",
+            self.webui_user_insight_api,
+            ["GET"],
+            "Get user insight data for Oyasumi",
+        )
 
     async def webui_users_api(self):
         limit = self._safe_int(
@@ -503,6 +521,65 @@ class OyasumiPlugin(Star):
             return jsonify({"status": "error", "message": str(exc)})
         return jsonify({"status": "ok", "data": {"snapshot": payload}})
 
+    async def webui_overview_api(self):
+        start_date, end_date, error = self._resolve_web_date_range(
+            days_value=request.args.get("days"),
+            start_date=(request.args.get("start_date", "") or "").strip(),
+            end_date=(request.args.get("end_date", "") or "").strip(),
+        )
+        if error:
+            return jsonify({"status": "error", "message": error})
+
+        data = await self.stats_service.build_group_overview(
+            start_date=start_date,
+            end_date=end_date,
+        )
+        return jsonify({"status": "ok", "data": data})
+
+    async def webui_leaderboard_api(self):
+        start_date, end_date, error = self._resolve_web_date_range(
+            days_value=request.args.get("days"),
+            start_date=(request.args.get("start_date", "") or "").strip(),
+            end_date=(request.args.get("end_date", "") or "").strip(),
+        )
+        if error:
+            return jsonify({"status": "error", "message": error})
+
+        limit = self._safe_int(
+            request.args.get("limit"),
+            default=10,
+            minimum=1,
+            maximum=100,
+        )
+        metric = (request.args.get("metric", "activity") or "activity").strip().lower()
+        data = await self.stats_service.build_leaderboard(
+            start_date=start_date,
+            end_date=end_date,
+            limit=limit,
+            metric=metric,
+        )
+        return jsonify({"status": "ok", "data": data})
+
+    async def webui_user_insight_api(self):
+        user_id = (request.args.get("user_id", "") or "").strip()
+        if not user_id:
+            return jsonify({"status": "error", "message": "user_id is required"})
+
+        start_date, end_date, error = self._resolve_web_date_range(
+            days_value=request.args.get("days"),
+            start_date=(request.args.get("start_date", "") or "").strip(),
+            end_date=(request.args.get("end_date", "") or "").strip(),
+        )
+        if error:
+            return jsonify({"status": "error", "message": error})
+
+        data = await self.stats_service.build_user_insight(
+            user_id=user_id,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        return jsonify({"status": "ok", "data": data})
+
     async def _build_dashboard_data(
         self,
         *,
@@ -553,6 +630,43 @@ class OyasumiPlugin(Star):
         except (TypeError, ValueError):
             return default
         return max(minimum, min(parsed, maximum))
+
+    def _resolve_web_date_range(
+        self,
+        *,
+        days_value: Any,
+        start_date: str,
+        end_date: str,
+        default_days: int = 7,
+        max_days: int = 90,
+    ) -> tuple[str, str, str | None]:
+        if start_date or end_date:
+            resolved_start, resolved_end = resolve_date_range(start_date, end_date)
+            if not validate_date_text(resolved_start) or not validate_date_text(
+                resolved_end
+            ):
+                return "", "", "Invalid date format, expected YYYY-MM-DD"
+            start_obj = datetime.strptime(resolved_start, "%Y-%m-%d").date()
+            end_obj = datetime.strptime(resolved_end, "%Y-%m-%d").date()
+            if end_obj < start_obj:
+                return "", "", "end_date must be greater than or equal to start_date"
+            if (end_obj - start_obj).days + 1 > max_days:
+                return "", "", f"Date range cannot exceed {max_days} days"
+            return resolved_start, resolved_end, None
+
+        days = self._safe_int(
+            days_value,
+            default=default_days,
+            minimum=1,
+            maximum=max_days,
+        )
+        today = date.today()
+        start_obj = today - timedelta(days=days - 1)
+        return (
+            start_obj.strftime("%Y-%m-%d"),
+            today.strftime("%Y-%m-%d"),
+            None,
+        )
 
     def _resolve_target_user(
         self, event: AstrMessageEvent, target_user_id: str

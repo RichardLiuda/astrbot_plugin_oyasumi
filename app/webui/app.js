@@ -1,45 +1,115 @@
-const $ = (id) => document.getElementById(id);
+﻿const $ = (id) => document.getElementById(id);
+
+const SECTION_IDS = [
+  "section_overview",
+  "section_trends",
+  "section_leaderboard",
+  "section_user_detail",
+  "section_analysis",
+  "section_snapshot",
+];
 
 const els = {
-  userId: $("user_id"),
-  days: $("days"),
-  limit: $("limit"),
-  startDate: $("start_date"),
-  endDate: $("end_date"),
+  navRail: $("nav_rail"),
+  drawerBackdrop: $("drawer_backdrop"),
+  navToggleBtn: $("nav_toggle_btn"),
+  statusText: $("status_text"),
+  statusPill: $("status_pill"),
   refreshBtn: $("refresh_btn"),
   logoutBtn: $("logout_btn"),
+  lastUpdated: $("last_updated"),
+  rangeChips: $("range_chips"),
+  customRange: $("custom_range"),
+  startDate: $("start_date"),
+  endDate: $("end_date"),
+  autoRefreshToggle: $("auto_refresh_toggle"),
+  showFullIdToggle: $("show_full_id_toggle"),
+  kpiGrid: $("kpi_grid"),
+  trendTabs: $("trend_tabs"),
+  groupChart: $("group_chart"),
+  groupChartFallback: $("group_chart_fallback"),
+  leaderboardList: $("leaderboard_list"),
+  selectedUserHint: $("selected_user_hint"),
+  userOverviewEmpty: $("user_overview_empty"),
+  userOverviewContent: $("user_overview_content"),
+  userKpiGrid: $("user_kpi_grid"),
+  userSleepHourlyChart: $("user_sleep_hourly_chart"),
+  userWakeHourlyChart: $("user_wake_hourly_chart"),
+  userDetailLabel: $("user_detail_label"),
+  userTrendChart: $("user_trend_chart"),
+  sessionStatusFilter: $("session_status_filter"),
+  sessionSourceFilter: $("session_source_filter"),
+  sessionDateFilter: $("session_date_filter"),
+  userSessionsTbody: $("user_sessions_tbody"),
+  snapshotJson: $("snapshot_json"),
   analysisBtn: $("analysis_btn"),
-  statusText: $("status_text"),
-  metrics: $("metrics"),
-  trendSvg: $("trend_svg"),
-  dailyList: $("daily_list"),
-  donut: $("session_donut"),
-  donutTotal: $("donut_total"),
-  donutLegend: $("donut_legend"),
-  insightBox: $("insight_box"),
-  sessionsBody: $("sessions_tbody"),
+  analysisState: $("analysis_state"),
   analysisMd: $("analysis_md"),
-  snapshot: $("snapshot"),
-  toast: $("toast"),
+  snackbar: $("snackbar"),
+  snackbarContent: document.querySelector("#snackbar .snackbar-content")
 };
 
-let toastTimer = null;
-let latestSummary = null;
-let latestDailyRows = [];
+const state = {
+  rangeMode: "7",
+  autoRefresh: true,
+  showFullId: false,
+  activeTrendTab: "series", // Default to series for better initial view
+  selectedUserId: "",
+  activeSection: "section_overview",
+  drawerOpen: false,
+  sectionObserver: null,
+  overview: null,
+  leaderboard: [],
+  userInsight: null,
+  sessions: [],
+  snapshot: null,
+  pollTimer: null,
+  snackbarTimer: null,
+  busy: false,
+};
 
-function initDates() {
-  const now = new Date();
-  const start = new Date(now);
-  start.setDate(now.getDate() - 6);
-  els.startDate.value = toDateInput(start);
-  els.endDate.value = toDateInput(now);
+const charts = {
+  group: null,
+  userTrend: null,
+  userSleepHourly: null,
+  userWakeHourly: null,
+};
+
+const hasEcharts = Boolean(window.echarts && window.OyasumiCharts);
+const POLL_INTERVAL_MS = 15000;
+
+function isMobileLayout() {
+  return window.matchMedia("(max-width: 768px)").matches;
 }
 
-function toDateInput(date) {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, "0");
-  const d = String(date.getDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
+function setBusy(busy) {
+  state.busy = busy;
+  document.body.classList.toggle("is-busy", busy);
+  els.refreshBtn.disabled = busy;
+  els.analysisBtn.disabled = busy;
+  if (busy) {
+    els.refreshBtn.classList.add('rotating');
+  } else {
+    els.refreshBtn.classList.remove('rotating');
+  }
+  setStatus(busy ? "同步中" : "就绪");
+}
+
+function setStatus(text) {
+  els.statusText.textContent = text;
+}
+
+function notify(message, error = false) {
+  if (state.snackbarTimer) {
+    window.clearTimeout(state.snackbarTimer);
+  }
+  if (els.snackbarContent) els.snackbarContent.textContent = message;
+  else els.snackbar.textContent = message;
+
+  els.snackbar.className = `md3-snackbar show${error ? " error" : ""}`;
+  state.snackbarTimer = window.setTimeout(() => {
+    els.snackbar.className = "md3-snackbar";
+  }, 3000);
 }
 
 function escapeHtml(raw) {
@@ -47,587 +117,615 @@ function escapeHtml(raw) {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
+    .replace(/\"/g, "&quot;")
     .replace(/'/g, "&#39;");
 }
 
-function renderAnalysisMarkdown(markdownText) {
-  const raw = String(markdownText || "").trim();
-  if (!raw) {
-    els.analysisMd.innerHTML = '<p class="md-placeholder">暂无分析内容</p>';
-    return;
-  }
-  els.analysisMd.innerHTML = markdownToHtml(raw);
+function toDateInput(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
-function markdownToHtml(markdown) {
-  const codeBlocks = [];
-  let src = escapeHtml(markdown).replace(/\r\n/g, "\n");
+function initDateInputs() {
+  const today = new Date();
+  const start = new Date(today);
+  start.setDate(start.getDate() - 6);
+  els.startDate.value = toDateInput(start);
+  els.endDate.value = toDateInput(today);
+}
 
-  src = src.replace(/```([\w-]*)\n([\s\S]*?)```/g, (_m, lang, code) => {
-    const index = codeBlocks.length;
-    const langClass = lang ? ` class="language-${lang}"` : "";
-    codeBlocks.push(
-      `<pre><code${langClass}>${code.replace(/\n$/, "")}</code></pre>`,
-    );
-    return `@@CODE_BLOCK_${index}@@`;
+function setRangeMode(mode) {
+  state.rangeMode = mode;
+  const chips = els.rangeChips.querySelectorAll("[data-range]");
+  chips.forEach((chip) => {
+    chip.classList.toggle("active", chip.dataset.range === mode);
   });
+  els.customRange.hidden = mode !== "custom";
+}
 
-  const lines = src.split("\n");
-  const html = [];
-  let paragraph = [];
-  let inUl = false;
-  let inOl = false;
-
-  const closeLists = () => {
-    if (inUl) {
-      html.push("</ul>");
-      inUl = false;
-    }
-    if (inOl) {
-      html.push("</ol>");
-      inOl = false;
-    }
-  };
-
-  const flushParagraph = () => {
-    if (paragraph.length === 0) {
-      return;
-    }
-    const content = paragraph.join("<br>");
-    html.push(`<p>${inlineMarkdown(content)}</p>`);
-    paragraph = [];
-  };
-
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed) {
-      flushParagraph();
-      closeLists();
-      continue;
-    }
-
-    const codeBlock = trimmed.match(/^@@CODE_BLOCK_(\d+)@@$/);
-    if (codeBlock) {
-      flushParagraph();
-      closeLists();
-      html.push(trimmed);
-      continue;
-    }
-
-    const heading = trimmed.match(/^(#{1,6})\s+(.+)$/);
-    if (heading) {
-      flushParagraph();
-      closeLists();
-      const level = heading[1].length;
-      html.push(`<h${level}>${inlineMarkdown(heading[2])}</h${level}>`);
-      continue;
-    }
-
-    const quote = trimmed.match(/^>\s?(.*)$/);
-    if (quote) {
-      flushParagraph();
-      closeLists();
-      html.push(`<blockquote>${inlineMarkdown(quote[1])}</blockquote>`);
-      continue;
-    }
-
-    const ulItem = trimmed.match(/^[-*+]\s+(.+)$/);
-    if (ulItem) {
-      flushParagraph();
-      if (inOl) {
-        html.push("</ol>");
-        inOl = false;
-      }
-      if (!inUl) {
-        html.push("<ul>");
-        inUl = true;
-      }
-      html.push(`<li>${inlineMarkdown(ulItem[1])}</li>`);
-      continue;
-    }
-
-    const olItem = trimmed.match(/^\d+\.\s+(.+)$/);
-    if (olItem) {
-      flushParagraph();
-      if (inUl) {
-        html.push("</ul>");
-        inUl = false;
-      }
-      if (!inOl) {
-        html.push("<ol>");
-        inOl = true;
-      }
-      html.push(`<li>${inlineMarkdown(olItem[1])}</li>`);
-      continue;
-    }
-
-    closeLists();
-    paragraph.push(trimmed);
+function currentRangeParams() {
+  if (state.rangeMode === "custom") {
+    const startDate = (els.startDate.value || "").trim();
+    const endDate = (els.endDate.value || "").trim();
+    return { start_date: startDate, end_date: endDate };
   }
-
-  flushParagraph();
-  closeLists();
-
-  let merged = html.join("\n");
-  merged = merged.replace(/@@CODE_BLOCK_(\d+)@@/g, (_m, idx) => {
-    return codeBlocks[Number(idx)] || "";
-  });
-  return merged;
+  return { days: state.rangeMode };
 }
 
-function inlineMarkdown(text) {
-  let out = text;
-  out = out.replace(
-    /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
-    '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>',
-  );
-  out = out.replace(/`([^`]+)`/g, "<code>$1</code>");
-  out = out.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-  out = out.replace(/__([^_]+)__/g, "<strong>$1</strong>");
-  out = out.replace(/\*([^*]+)\*/g, "<em>$1</em>");
-  out = out.replace(/_([^_]+)_/g, "<em>$1</em>");
-  out = out.replace(/~~([^~]+)~~/g, "<del>$1</del>");
-  return out;
-}
-
-function getBaseParams() {
+function concreteRangeFromOverview() {
+  if (state.rangeMode === "custom") {
+    return {
+      start_date: (els.startDate.value || "").trim(),
+      end_date: (els.endDate.value || "").trim(),
+    };
+  }
+  if (state.overview) {
+    return {
+      start_date: state.overview.start_date,
+      end_date: state.overview.end_date,
+    };
+  }
+  const days = Number(state.rangeMode || 7);
+  const end = new Date();
+  const start = new Date(end);
+  start.setDate(start.getDate() - Math.max(days, 1) + 1);
   return {
-    user_id: els.userId.value,
-    days: els.days.value,
-    limit: els.limit.value,
-    start_date: els.startDate.value,
-    end_date: els.endDate.value,
+    start_date: toDateInput(start),
+    end_date: toDateInput(end),
   };
 }
 
-function setLoading(loading) {
-  document.body.classList.toggle("loading", loading);
-  els.refreshBtn.disabled = loading;
-  els.analysisBtn.disabled = loading;
-  els.statusText.textContent = loading ? "加载中" : "就绪";
+function toQueryString(params) {
+  const query = new URLSearchParams();
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value === undefined || value === null) return;
+    const text = String(value).trim();
+    if (text) {
+      query.set(key, text);
+    }
+  });
+  return query.toString();
 }
 
-function notify(message, type = "info") {
-  if (toastTimer) {
-    clearTimeout(toastTimer);
+function maskUserId(userId) {
+  const text = String(userId || "");
+  if (state.showFullId) return text;
+  if (text.length <= 4) return `${text.slice(0, 1)}***`;
+  if (text.length <= 8) return `${text.slice(0, 2)}***${text.slice(-2)}`;
+  return `${text.slice(0, 3)}***${text.slice(-3)}`;
+}
+
+function formatMinutes(minutes) {
+  return window.OyasumiCharts ? window.OyasumiCharts.minutesToHourText(minutes) : `${minutes} 分钟`;
+}
+
+function formatDatetime(value) {
+  if (!value) return "-";
+  const text = String(value);
+  return text.length >= 16 ? text.slice(0, 16).replace('-', '/') : text;
+}
+
+function formatPercent(value) {
+  return `${Math.round(Number(value || 0) * 100)}%`;
+}
+
+function setActiveSection(
+  sectionId,
+  { scroll = false, smooth = true, closeDrawer = false } = {},
+) {
+  if (!sectionId || !SECTION_IDS.includes(sectionId)) return;
+  state.activeSection = sectionId;
+
+  const buttons = document.querySelectorAll(".nav-dest[data-section-target]");
+  buttons.forEach((button) => {
+    button.classList.toggle("active", button.dataset.sectionTarget === sectionId);
+  });
+
+  if (scroll) {
+    const target = document.getElementById(sectionId);
+    if (target) {
+      target.scrollIntoView({
+        behavior: smooth ? "smooth" : "auto",
+        block: "start",
+      });
+    }
   }
-  els.toast.textContent = message;
-  els.toast.className = `toast show ${type === "error" ? "error" : ""}`.trim();
-  toastTimer = setTimeout(() => {
-    els.toast.className = "toast";
-  }, 2200);
+
+  if (closeDrawer && isMobileLayout()) {
+    closeSidebarDrawer();
+  }
+}
+
+function openSidebarDrawer() {
+  if (!isMobileLayout()) return;
+  state.drawerOpen = true;
+  document.body.classList.add("drawer-open");
+}
+
+function closeSidebarDrawer() {
+  state.drawerOpen = false;
+  document.body.classList.remove("drawer-open");
+}
+
+function syncSectionByScroll() {
+  if (state.sectionObserver) {
+    state.sectionObserver.disconnect();
+    state.sectionObserver = null;
+  }
+
+  if (!("IntersectionObserver" in window)) return;
+
+  const sections = SECTION_IDS.map((id) => document.getElementById(id)).filter(Boolean);
+  if (!sections.length) return;
+
+  state.sectionObserver = new IntersectionObserver(
+    (entries) => {
+      const visibleEntries = entries
+        .filter((entry) => entry.isIntersecting)
+        .sort((a, b) => b.intersectionRatio - a.intersectionRatio);
+      if (!visibleEntries.length) return;
+      const topEntry = visibleEntries[0];
+      const targetId = topEntry.target?.id;
+      if (targetId && targetId !== state.activeSection) {
+        setActiveSection(targetId, { scroll: false });
+      }
+    },
+    { threshold: [0.25, 0.45, 0.65], rootMargin: "-80px 0px -50% 0px" }
+  );
+
+  sections.forEach((section) => state.sectionObserver.observe(section));
 }
 
 async function api(path, method = "GET", body = null) {
-  const headers = {};
-  if (body !== null) {
-    headers["Content-Type"] = "application/json";
-  }
-
   const response = await fetch(path, {
     method,
-    headers,
     credentials: "same-origin",
-    body: body === null ? null : JSON.stringify(body),
+    headers: body ? { "Content-Type": "application/json" } : {},
+    body: body ? JSON.stringify(body) : null,
   });
+
   if (response.status === 401) {
     window.location.href = "/login";
-    throw new Error("未登录或登录已过期");
+    throw new Error("会话已过期，请重新登录");
   }
 
   let payload = null;
   try {
     payload = await response.json();
-  } catch (_err) {
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
+  } catch (_error) {
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
   }
 
   if (!response.ok || payload?.status !== "ok") {
     throw new Error(payload?.message || `HTTP ${response.status}`);
   }
-  return payload.data;
+
+  return payload.data || {};
 }
 
-async function checkAuthStatus() {
+async function checkAuth() {
   const data = await api("/api/auth/status");
-  const requireLogin = Boolean(data.require_login);
-  const authed = Boolean(data.authenticated);
-  if (els.logoutBtn) {
-    els.logoutBtn.hidden = !requireLogin;
-  }
-  if (requireLogin && !authed) {
+  if (data.require_login) els.logoutBtn.hidden = false;
+  if (data.require_login && !data.authenticated) {
     window.location.href = "/login";
     return false;
   }
   return true;
 }
 
-function minutesText(value) {
-  const minutes = Number(value || 0);
-  const h = Math.floor(minutes / 60);
-  const m = minutes % 60;
-  return h > 0 ? `${h}小时${m}分钟` : `${m}分钟`;
+function ensureChart(target, key) {
+  if (!hasEcharts || !target) return null;
+  if (charts[key]) return charts[key];
+  charts[key] = window.echarts.init(target, null, { renderer: "canvas" });
+  return charts[key];
 }
 
-function shortDate(dateLike) {
-  if (!dateLike) {
-    return "-";
-  }
-  const raw = String(dateLike);
-  if (raw.length >= 10) {
-    return raw.slice(5, 10);
-  }
-  return raw;
+function clearChart(key) {
+  if (!charts[key]) return;
+  charts[key].dispose();
+  charts[key] = null;
 }
 
-function renderMetrics(summary) {
-  const rows = [
-    ["总睡眠时长", minutesText(summary.total_sleep_minutes)],
-    ["总会话数", String(summary.total_sessions ?? 0)],
-    ["平均时长", minutesText(summary.avg_sleep_minutes)],
-    ["进行中会话", String(summary.open_session_count ?? 0)],
-    ["仅早安事件", String(summary.orphan_morning_count ?? 0)],
+function renderKpis() {
+  const kpis = state.overview?.kpis;
+  if (!kpis) {
+    els.kpiGrid.innerHTML = "";
+    return;
+  }
+
+  const cards = [
+    { label: "活跃人数", value: String(kpis.active_user_count || 0), sub: "发生闭合会话" },
+    { label: "打卡次数", value: String(kpis.total_sessions || 0), sub: "有效睡眠记录" },
+    { label: "人均睡眠", value: formatMinutes(kpis.avg_sleep_minutes || 0), sub: "平均时长" },
+    { label: "进行中会话", value: String(kpis.open_session_count || 0), sub: "挂机状态" },
+    { label: "孤立早安", value: String(kpis.orphan_morning_count || 0), sub: "未补录晚安" },
+    { label: "补录率", value: formatPercent(kpis.auto_fill_ratio || 0), sub: `系统自动纠错` },
   ];
 
-  els.metrics.innerHTML = rows
-    .map(
-      ([key, value]) => `
-      <article class="metric">
-        <div class="metric-key">${escapeHtml(key)}</div>
-        <div class="metric-value">${escapeHtml(value)}</div>
+  els.kpiGrid.innerHTML = cards.map((card) => `
+      <article class="kpi-card">
+        <div class="kpi-label">${escapeHtml(card.label)}</div>
+        <div class="kpi-value">${escapeHtml(card.value)}</div>
+        <div class="kpi-sub">${escapeHtml(card.sub)}</div>
       </article>
-    `,
-    )
-    .join("");
+  `).join("");
 }
 
-function renderTrendChart(dailyRows) {
-  if (!dailyRows.length) {
-    els.trendSvg.innerHTML = `
-      <text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#648082" font-size="14">
-        暂无趋势数据
-      </text>
-    `;
+function renderGroupChart() {
+  const dailySeries = state.overview?.daily_series || [];
+  const sleepHeatmap = state.overview?.sleep_heatmap || [];
+  const wakeHeatmap = state.overview?.wake_heatmap || [];
+
+  if (!hasEcharts) {
+    els.groupChart.innerHTML = "";
+    els.groupChartFallback.hidden = false;
+    els.groupChartFallback.innerHTML = window.OyasumiCharts
+      ? window.OyasumiCharts.fallbackTrendTable(dailySeries)
+      : "<p class='empty-text'>图表引擎加载未完备。</p>";
     return;
   }
 
-  const rows = [...dailyRows].sort((a, b) => String(a.stat_date).localeCompare(String(b.stat_date)));
-  const width = 860;
-  const height = 280;
-  const pad = { l: 44, r: 18, t: 18, b: 36 };
-  const innerW = width - pad.l - pad.r;
-  const innerH = height - pad.t - pad.b;
+  els.groupChartFallback.hidden = true;
+  const chart = ensureChart(els.groupChart, "group");
+  if (!chart) return;
 
-  const values = rows.map((item) => Number(item.total_minutes || 0));
-  const maxVal = Math.max(...values, 1);
-  const yMax = Math.ceil(maxVal / 30) * 30 || 30;
-
-  const points = rows.map((item, index) => {
-    const x = pad.l + (innerW * index) / Math.max(rows.length - 1, 1);
-    const v = Number(item.total_minutes || 0);
-    const y = pad.t + innerH - (v / yMax) * innerH;
-    return { x, y, v, date: item.stat_date };
-  });
-
-  const linePath = points
-    .map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`)
-    .join(" ");
-  const areaPath = `${linePath} L ${points[points.length - 1].x.toFixed(1)},${(pad.t + innerH).toFixed(1)} L ${points[0].x.toFixed(1)},${(pad.t + innerH).toFixed(1)} Z`;
-
-  const grid = [0, 0.25, 0.5, 0.75, 1]
-    .map((ratio) => {
-      const y = pad.t + innerH * ratio;
-      const value = Math.round((1 - ratio) * yMax);
-      return `
-        <line x1="${pad.l}" y1="${y.toFixed(1)}" x2="${(pad.l + innerW).toFixed(1)}" y2="${y.toFixed(1)}" stroke="#d4e4e6" stroke-width="1"/>
-        <text x="${pad.l - 8}" y="${(y + 4).toFixed(1)}" text-anchor="end" fill="#6b8587" font-size="11">${value}</text>
-      `;
-    })
-    .join("");
-
-  const markers = points
-    .map(
-      (p) => `
-      <circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="4.2" fill="#ffffff" stroke="#2a8e91" stroke-width="2"/>
-      <text x="${p.x.toFixed(1)}" y="${(height - 12).toFixed(1)}" text-anchor="middle" fill="#648082" font-size="10">${escapeHtml(shortDate(p.date))}</text>
-    `,
-    )
-    .join("");
-
-  els.trendSvg.innerHTML = `
-    <defs>
-      <linearGradient id="trendArea" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#52b7ba" stop-opacity="0.45" />
-        <stop offset="100%" stop-color="#52b7ba" stop-opacity="0.04" />
-      </linearGradient>
-      <linearGradient id="trendLine" x1="0" y1="0" x2="1" y2="0">
-        <stop offset="0%" stop-color="#1f8f92" />
-        <stop offset="100%" stop-color="#66bdc0" />
-      </linearGradient>
-    </defs>
-    ${grid}
-    <path d="${areaPath}" fill="url(#trendArea)" />
-    <path d="${linePath}" fill="none" stroke="url(#trendLine)" stroke-width="3.2" stroke-linejoin="round" stroke-linecap="round" />
-    ${markers}
-  `;
-}
-
-function renderDailyBars(dailyRows) {
-  if (!dailyRows.length) {
-    els.dailyList.innerHTML = '<div class="section-desc">暂无数据</div>';
-    return;
-  }
-  const rows = [...dailyRows].sort((a, b) => String(a.stat_date).localeCompare(String(b.stat_date)));
-  const maxMinutes = Math.max(...rows.map((item) => Number(item.total_minutes || 0)), 1);
-  els.dailyList.innerHTML = rows
-    .map((item) => {
-      const minutes = Number(item.total_minutes || 0);
-      const width = Math.max(6, Math.round((minutes / maxMinutes) * 100));
-      return `
-        <div class="daily-item">
-          <div class="daily-date">${escapeHtml(shortDate(item.stat_date))}</div>
-          <div class="daily-bar-wrap"><div class="daily-bar" style="width:${width}%"></div></div>
-          <div class="daily-value">${escapeHtml(minutesText(minutes))} · ${escapeHtml(item.session_count ?? 0)}次</div>
-        </div>
-      `;
-    })
-    .join("");
-}
-
-function renderComposition(summary) {
-  const totalSessions = Number(summary.total_sessions || 0);
-  const openSessions = Number(summary.open_session_count || 0);
-  const orphanMorning = Number(summary.orphan_morning_count || 0);
-  const closedSessions = Math.max(totalSessions - openSessions, 0);
-
-  const segs = [
-    { key: "已完成", val: closedSessions, color: "var(--chart-a)" },
-    { key: "进行中", val: openSessions, color: "var(--chart-b)" },
-    { key: "仅早安事件", val: orphanMorning, color: "var(--chart-c)" },
-  ];
-  const sum = Math.max(segs.reduce((acc, cur) => acc + cur.val, 0), 1);
-
-  let from = 0;
-  const gradientParts = segs.map((seg) => {
-    const pct = (seg.val / sum) * 100;
-    const to = from + pct;
-    const chunk = `${seg.color} ${from.toFixed(2)}% ${to.toFixed(2)}%`;
-    from = to;
-    return chunk;
-  });
-  els.donut.style.background = `conic-gradient(${gradientParts.join(", ")})`;
-  els.donutTotal.textContent = String(totalSessions);
-
-  els.donutLegend.innerHTML = segs
-    .map(
-      (seg) => `
-      <div class="legend-item">
-        <div class="legend-left">
-          <span class="legend-dot" style="background:${seg.color}"></span>
-          <span class="legend-name">${escapeHtml(seg.key)}</span>
-        </div>
-        <span class="legend-val">${escapeHtml(seg.val)}</span>
-      </div>
-    `,
-    )
-    .join("");
-}
-
-function renderInsights() {
-  if (!latestSummary) {
-    els.insightBox.innerHTML = "<p>等待数据加载…</p>";
-    return;
-  }
-  const avg = Number(latestSummary.avg_sleep_minutes || 0);
-  const open = Number(latestSummary.open_session_count || 0);
-  const orphan = Number(latestSummary.orphan_morning_count || 0);
-  const dailyAvg = latestDailyRows.length
-    ? Math.round(
-        latestDailyRows.reduce((acc, row) => acc + Number(row.total_minutes || 0), 0) /
-          latestDailyRows.length,
-      )
-    : 0;
-
-  const hints = [];
-  if (avg < 300) {
-    hints.push("平均睡眠时长偏低，近期可能存在晚睡或睡眠中断。");
-  } else if (avg > 540) {
-    hints.push("平均睡眠时长较高，建议结合精力状态评估作息质量。");
+  let option = null;
+  if (state.activeTrendTab === "sleep") {
+    option = window.OyasumiCharts.buildHeatmapOption("入睡习惯图谱", sleepHeatmap, "入睡");
+  } else if (state.activeTrendTab === "wake") {
+    option = window.OyasumiCharts.buildHeatmapOption("起床习惯图谱", wakeHeatmap, "起床");
   } else {
-    hints.push("平均睡眠时长处于常见区间，节律整体较稳定。");
+    option = window.OyasumiCharts.buildGroupTrendOption(dailySeries);
   }
-  if (open > 0) {
-    hints.push(`当前仍有 ${open} 条未闭合会话，可能存在漏记晚安或早安。`);
-  }
-  if (orphan > 0) {
-    hints.push(`检测到 ${orphan} 条仅早安事件，建议检查时间归属规则。`);
-  }
-  hints.push(`近窗口每日平均睡眠约 ${minutesText(dailyAvg)}。`);
 
-  els.insightBox.innerHTML = hints.map((item) => `<p>• ${escapeHtml(item)}</p>`).join("");
+  chart.setOption(option, true);
 }
 
-function renderSessions(sessions) {
-  if (!sessions.length) {
-    els.sessionsBody.innerHTML = '<tr><td colspan="7">暂无数据</td></tr>';
+function renderLeaderboard() {
+  const items = state.leaderboard || [];
+  if (!items.length) {
+    els.leaderboardList.innerHTML = '<div class="premium-empty-state minimal"><p>区间内暂无活跃数据</p></div>';
     return;
   }
-  els.sessionsBody.innerHTML = sessions
-    .map(
-      (session) => `
+
+  els.leaderboardList.innerHTML = items.map((item, index) => {
+    const userId = String(item.user_id || "");
+    const userIdEncoded = encodeURIComponent(userId);
+    const selectedClass = state.selectedUserId === userId ? "active" : "";
+    return `
+        <button class="leader-row ${selectedClass}" type="button" data-user-id="${escapeHtml(userIdEncoded)}">
+          <span class="rank">#${index + 1}</span>
+          <span class="user">${escapeHtml(maskUserId(userId))}</span>
+          <span class="meta">${escapeHtml(formatMinutes(item.total_sleep_minutes || 0))}</span>
+        </button>
+      `;
+  }).join("");
+}
+
+function renderUserOverview() {
+  if (!state.selectedUserId || !state.userInsight) {
+    els.userOverviewEmpty.hidden = false;
+    els.userOverviewContent.hidden = true;
+    els.selectedUserHint.textContent = "未选择";
+    els.userDetailLabel.textContent = "未选择用户";
+    els.userKpiGrid.innerHTML = "";
+    clearChart("userTrend"); clearChart("userSleepHourly"); clearChart("userWakeHourly");
+    if (!hasEcharts) {
+      els.userTrendChart.innerHTML = ''; els.userSleepHourlyChart.innerHTML = ''; els.userWakeHourlyChart.innerHTML = '';
+    }
+    return;
+  }
+
+  const userIdLabel = maskUserId(state.selectedUserId);
+  const kpis = state.userInsight.kpis || {};
+  els.userOverviewEmpty.hidden = true;
+  els.userOverviewContent.hidden = false;
+  els.selectedUserHint.textContent = `${userIdLabel}`;
+  els.userDetailLabel.textContent = `${userIdLabel}`;
+
+  const miniCards = [
+    { label: "会话总计", value: String(kpis.total_sessions || 0) },
+    { label: "熬夜偏晚率", value: formatPercent(kpis.late_sleep_rate || 0) },
+    { label: "人均异常", value: String((kpis.orphan_morning_count || 0) + (kpis.open_session_count || 0)) },
+  ];
+  els.userKpiGrid.innerHTML = miniCards.map((card) => `
+      <article class="mini-kpi">
+        <div class="mini-kpi-label">${escapeHtml(card.label)}</div>
+        <div class="mini-kpi-value">${escapeHtml(card.value)}</div>
+      </article>
+  `).join("");
+
+  const dailySeries = state.userInsight.daily_series || [];
+  if (!hasEcharts) {
+    els.userTrendChart.innerHTML = window.OyasumiCharts ? window.OyasumiCharts.fallbackTrendTable(dailySeries) : '';
+    return;
+  }
+
+  const userTrend = ensureChart(els.userTrendChart, "userTrend");
+  if (userTrend) userTrend.setOption(window.OyasumiCharts.buildUserTrendOption(dailySeries, userIdLabel), true);
+
+  const sleepHourly = ensureChart(els.userSleepHourlyChart, "userSleepHourly");
+  if (sleepHourly) sleepHourly.setOption(window.OyasumiCharts.buildSleepHourlyOption(state.userInsight.sleep_hourly || []), true);
+
+  const wakeHourly = ensureChart(els.userWakeHourlyChart, "userWakeHourly");
+  if (wakeHourly) wakeHourly.setOption(window.OyasumiCharts.buildWakeHourlyOption(state.userInsight.wake_hourly || []), true);
+}
+
+function filterSessions(rows) {
+  const statusFilter = els.sessionStatusFilter?.value || 'all';
+  const sourceFilter = els.sessionSourceFilter?.value || 'all';
+  const dateFilter = (els.sessionDateFilter?.value || "").trim();
+
+  return (rows || []).filter((session) => {
+    if (statusFilter !== "all" && String(session.status || "") !== statusFilter) return false;
+    if (sourceFilter !== "all" && String(session.source || "") !== sourceFilter) return false;
+    if (dateFilter) {
+      const sleepTime = String(session.sleep_time || "");
+      const wakeTime = String(session.wake_time || "");
+      if (!sleepTime.startsWith(dateFilter) && !wakeTime.startsWith(dateFilter)) return false;
+    }
+    return true;
+  });
+}
+
+function renderSessions() {
+  if (!state.selectedUserId) {
+    els.userSessionsTbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#74777f">请在上方选择用户</td></tr>';
+    return;
+  }
+
+  const rows = filterSessions(state.sessions);
+  if (!rows.length) {
+    els.userSessionsTbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#74777f">暂无匹配记录</td></tr>';
+    return;
+  }
+
+  els.userSessionsTbody.innerHTML = rows.map((session) => `
       <tr>
-        <td>${escapeHtml(session.id)}</td>
-        <td>${escapeHtml(session.user_id)}</td>
-        <td>${escapeHtml(session.status || "-")}</td>
-        <td>${escapeHtml(session.sleep_time || "-")}</td>
-        <td>${escapeHtml(session.wake_time || "-")}</td>
+        <td style="color:#74777f;font-family:monospace;font-size:12px;">${escapeHtml(session.id)}</td>
+        <td style="font-weight:600;">${escapeHtml(maskUserId(session.user_id))}</td>
+        <td><span class="md3-badge ${session.status === 'open' ? 'error' : 'neutral'}">${escapeHtml(session.status || "-")}</span></td>
+        <td>${escapeHtml(formatDatetime(session.sleep_time))}</td>
+        <td>${escapeHtml(formatDatetime(session.wake_time))}</td>
         <td>${escapeHtml(session.duration_minutes ?? "-")}</td>
         <td>${escapeHtml(session.source || "-")}</td>
       </tr>
-    `,
-    )
-    .join("");
+  `).join("");
 }
 
-async function loadUsers() {
-  const data = await api("/api/users?limit=200");
-  const previous = els.userId.value;
-  els.userId.innerHTML = '<option value="">全部用户</option>';
-  for (const userId of data.user_ids || []) {
-    const option = document.createElement("option");
-    option.value = userId;
-    option.textContent = userId;
-    els.userId.appendChild(option);
-  }
-  if (previous) {
-    els.userId.value = previous;
-  }
+function renderSnapshot() {
+  els.snapshotJson.textContent = JSON.stringify(state.snapshot || {}, null, 2);
 }
 
-async function loadDashboard() {
-  const params = getBaseParams();
-  const query = new URLSearchParams({ days: params.days });
-  if (params.user_id) {
-    query.set("user_id", params.user_id);
-  }
-  const data = await api(`/api/dashboard?${query.toString()}`);
-  latestDailyRows = data.daily || [];
-  renderTrendChart(latestDailyRows);
-  renderDailyBars(latestDailyRows);
-  renderInsights();
+function updateLastUpdated() {
+  const now = new Date();
+  els.lastUpdated.textContent = `最近刷新：${now.toLocaleTimeString("zh-CN")}`;
 }
 
-async function loadSummary() {
-  const params = getBaseParams();
-  const query = new URLSearchParams({
-    start_date: params.start_date,
-    end_date: params.end_date,
-  });
-  if (params.user_id) {
-    query.set("user_id", params.user_id);
-  }
-  latestSummary = await api(`/api/summary?${query.toString()}`);
-  renderMetrics(latestSummary);
-  renderComposition(latestSummary);
-  renderInsights();
+function renderAll() {
+  renderKpis();
+  renderGroupChart();
+  renderLeaderboard();
+  renderUserOverview();
+  renderSessions();
+  renderSnapshot();
 }
 
-async function loadSessions() {
-  const params = getBaseParams();
-  const query = new URLSearchParams({ limit: params.limit });
-  if (params.user_id) {
-    query.set("user_id", params.user_id);
-  }
-  const data = await api(`/api/sessions?${query.toString()}`);
-  renderSessions(data.sessions || []);
+async function loadOverview(rangeParams) {
+  state.overview = await api(`/api/overview?${toQueryString(rangeParams)}`);
+}
+
+async function loadLeaderboard(rangeParams) {
+  const payload = await api(`/api/leaderboard?${toQueryString({ ...rangeParams, limit: 10, metric: "activity" })}`);
+  state.leaderboard = payload.items || [];
 }
 
 async function loadSnapshot() {
-  const data = await api("/api/snapshot");
-  els.snapshot.textContent = JSON.stringify(data.snapshot || {}, null, 2);
+  const payload = await api("/api/snapshot");
+  state.snapshot = payload.snapshot || null;
 }
 
-async function refreshAll() {
-  setLoading(true);
+async function loadSelectedUserData(rangeParams) {
+  if (!state.selectedUserId) {
+    state.userInsight = null;
+    state.sessions = [];
+    return;
+  }
+  const [insight, sessionPayload] = await Promise.all([
+    api(`/api/user_insight?${toQueryString({ ...rangeParams, user_id: state.selectedUserId })}`),
+    api(`/api/sessions?${toQueryString({ user_id: state.selectedUserId, limit: 200 })}`),
+  ]);
+  state.userInsight = insight;
+  state.sessions = sessionPayload.sessions || [];
+}
+
+async function refreshAll({ silent = false } = {}) {
+  if (!silent) setBusy(true);
   try {
-    await loadUsers();
-    await Promise.all([loadDashboard(), loadSummary(), loadSessions(), loadSnapshot()]);
-    notify("数据已刷新");
-  } catch (err) {
-    notify(err.message || String(err), "error");
+    const rangeParams = currentRangeParams();
+    await Promise.all([loadOverview(rangeParams), loadLeaderboard(rangeParams), loadSnapshot()]);
+    await loadSelectedUserData(rangeParams);
+    renderAll();
+    updateLastUpdated();
+    if (!silent) notify("看板数据已同步");
+  } catch (error) {
+    notify(error.message || String(error), true);
   } finally {
-    setLoading(false);
+    if (!silent) setBusy(false);
   }
 }
 
-async function generateAnalysis() {
-  setLoading(true);
-  try {
-    const params = getBaseParams();
-    const body = {
-      user_id: params.user_id,
-      start_date: params.start_date,
-      end_date: params.end_date,
-      use_llm: true,
-      user_name: params.user_id || "all_users",
-    };
-    const data = await api("/api/analysis", "POST", body);
-    renderAnalysisMarkdown(data.analysis_text || "");
+async function onLeaderboardClick(event) {
+  const target = event.target.closest("[data-user-id]");
+  if (!target) return;
+  const userId = decodeURIComponent(String(target.dataset.userId || ""));
+  if (!userId) return;
 
-    if (data.used_llm) {
-      notify("分析已生成（LLM）");
-    } else {
-      const reasonMap = {
-        llm_disabled: "未启用 LLM",
-        provider_not_found: "未找到可用模型",
-        provider_not_found_fallback: "未找到可用模型，已回退统计",
-        llm_failed: "LLM 调用失败",
-        llm_failed_fallback: "LLM 调用失败，已回退统计",
-        not_requested_or_no_data: "无有效会话数据",
-      };
-      const reasonText = reasonMap[data.llm_reason] || data.llm_reason || "已回退";
-      notify(`分析已生成（${reasonText}）`);
+  state.selectedUserId = userId;
+  setBusy(true);
+  try {
+    await loadSelectedUserData(currentRangeParams());
+    renderLeaderboard();
+    renderUserOverview();
+    renderSessions();
+    setActiveSection("section_user_detail", { scroll: true, closeDrawer: true });
+  } catch (error) {
+    notify(error.message || String(error), true);
+  } finally {
+    setBusy(false);
+  }
+}
+
+function markdownToHtml(markdown) {
+  let src = escapeHtml(markdown || "").replace(/\r\n/g, "\n");
+  src = src.replace(/```([\w-]*)\n([\s\S]*?)```/g, (_m, lang, code) => `<pre><code>${code.replace(/\n$/, "")}</code></pre>`);
+
+  const lines = src.split("\n");
+  const html = [];
+  let paragraph = [];
+
+  function flush() {
+    if (paragraph.length) html.push(`<p>${paragraph.join("<br>")}</p>`);
+    paragraph = [];
+  }
+
+  for (const line of lines) {
+    const t = line.trim();
+    if (!t) { flush(); continue; }
+    if (t.startsWith('<pre>')) { flush(); html.push(t); continue; }
+
+    const h = t.match(/^(#{1,6})\s+(.+)$/);
+    if (h) { flush(); html.push(`<h${h[1].length}>${h[2]}</h${h[1].length}>`); continue; }
+
+    if (t.match(/^>\s?(.*)$/)) { flush(); html.push(`<blockquote>${t.replace(/^>\s?/, '')}</blockquote>`); continue; }
+    if (t.match(/^[-*+]\s+(.+)$/)) { flush(); html.push(`<li>${t.replace(/^[-*+]\s+/, '')}</li>`); continue; }
+
+    paragraph.push(t);
+  }
+  flush();
+  return html.join("\n").replace(/<li>/g, '<ul><li>').replace(/<\/li>\n(?!<li>)/g, '</li></ul>\n').replace(/<\/ul>\n<ul>/g, '\n');
+}
+
+async function handleGenerateAnalysis() {
+  const rangeParams = concreteRangeFromOverview();
+  const options = {
+    start_date: rangeParams.start_date,
+    end_date: rangeParams.end_date,
+    user_id: state.selectedUserId || undefined,
+  };
+
+  els.analysisBtn.disabled = true;
+  els.analysisState.textContent = "LLM 大模型深度分析中...";
+  try {
+    const payload = await api("/api/analyze", "POST", options);
+    if (!payload.markdown) throw new Error("返回数据结构异常");
+    els.analysisState.textContent = "分析已完成";
+    els.analysisMd.innerHTML = markdownToHtml(payload.markdown);
+  } catch (error) {
+    els.analysisState.textContent = "分析失败";
+    els.analysisMd.innerHTML = `<p style="color:red;">异常：${escapeHtml(error.message || String(error))}</p>`;
+    notify(error.message || "生成分析报告异常", true);
+  } finally {
+    els.analysisBtn.disabled = false;
+  }
+}
+
+function handleResize() {
+  Object.values(charts).forEach((c) => { if (c) c.resize(); });
+}
+
+function setupEvents() {
+  els.rangeChips?.addEventListener("click", (e) => {
+    if (e.target.dataset.range) {
+      setRangeMode(e.target.dataset.range);
+      refreshAll();
     }
-  } catch (err) {
-    notify(err.message || String(err), "error");
-  } finally {
-    setLoading(false);
-  }
-}
+  });
 
-async function logout() {
-  setLoading(true);
-  try {
-    await api("/api/auth/logout", "POST", {});
-  } catch (_err) {
-    // Ignore and force redirect to login page.
-  } finally {
+  ['startDate', 'endDate'].forEach(id => els[id]?.addEventListener("change", () => {
+    if (state.rangeMode === "custom") refreshAll();
+  }));
+
+  els.autoRefreshToggle?.addEventListener("change", (e) => {
+    state.autoRefresh = e.target.checked;
+    if (state.autoRefresh) schedulePoll();
+    else clearTimeout(state.pollTimer);
+  });
+
+  els.showFullIdToggle?.addEventListener("change", (e) => {
+    state.showFullId = e.target.checked;
+    renderLeaderboard(); renderUserOverview(); renderSessions();
+  });
+
+  els.trendTabs?.addEventListener("click", (e) => {
+    if (e.target.dataset.tab) {
+      state.activeTrendTab = e.target.dataset.tab;
+      els.trendTabs.querySelectorAll(".segment").forEach(btn => btn.classList.toggle("active", btn.dataset.tab === state.activeTrendTab));
+      renderGroupChart();
+    }
+  });
+
+  els.leaderboardList?.addEventListener("click", onLeaderboardClick);
+
+  ['sessionStatusFilter', 'sessionSourceFilter', 'sessionDateFilter'].forEach(id =>
+    els[id]?.addEventListener("change", renderSessions)
+  );
+
+  els.refreshBtn?.addEventListener("click", () => refreshAll());
+  els.analysisBtn?.addEventListener("click", handleGenerateAnalysis);
+
+  els.logoutBtn?.addEventListener("click", () => {
+    document.cookie = "oyasumi_webui_token=; path=/; max-age=0";
     window.location.href = "/login";
-  }
+  });
+
+  document.querySelectorAll(".nav-dest[data-section-target]").forEach(btn => {
+    btn.addEventListener("click", () => setActiveSection(btn.dataset.sectionTarget, { scroll: true, closeDrawer: true }));
+  });
+
+  els.navToggleBtn?.addEventListener("click", () => {
+    if (state.drawerOpen) closeSidebarDrawer();
+    else openSidebarDrawer();
+  });
+
+  els.drawerBackdrop?.addEventListener("click", closeSidebarDrawer);
+  window.addEventListener("resize", () => requestAnimationFrame(handleResize));
 }
 
-function bindEvents() {
-  els.refreshBtn.addEventListener("click", refreshAll);
-  els.analysisBtn.addEventListener("click", generateAnalysis);
-  if (els.logoutBtn) {
-    els.logoutBtn.addEventListener("click", logout);
-  }
+function schedulePoll() {
+  clearTimeout(state.pollTimer);
+  if (!state.autoRefresh) return;
+  state.pollTimer = setTimeout(async () => {
+    if (!state.busy) await refreshAll({ silent: true });
+    schedulePoll();
+  }, POLL_INTERVAL_MS);
 }
 
 async function bootstrap() {
-  initDates();
-  bindEvents();
-  renderAnalysisMarkdown("");
-  const canContinue = await checkAuthStatus();
-  if (!canContinue) {
+  // Intro animation
+  document.body.style.opacity = '0';
+  setTimeout(() => {
+    document.body.style.transition = 'opacity 0.8s cubic-bezier(0.2, 0, 0, 1)';
+    document.body.style.opacity = '1';
+  }, 100);
+
+  initDateInputs();
+  setRangeMode("7");
+  setupEvents();
+
+  try {
+    const passed = await checkAuth();
+    if (!passed) return;
+  } catch (e) {
+    notify(e.message, true);
     return;
   }
+
   await refreshAll();
+  syncSectionByScroll();
+  schedulePoll();
 }
 
-bootstrap().catch((err) => {
-  notify(err.message || String(err), "error");
-});
+bootstrap();

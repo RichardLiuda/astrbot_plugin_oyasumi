@@ -267,3 +267,21 @@ class StandaloneWebUIServer:
             if request.method == "OPTIONS":
                 return Response(status=204)
             return await self.plugin.webui_snapshot_api()
+
+        @self.app.route("/api/overview", methods=["GET", "OPTIONS"])
+        async def api_overview():
+            if request.method == "OPTIONS":
+                return Response(status=204)
+            return await self.plugin.webui_overview_api()
+
+        @self.app.route("/api/leaderboard", methods=["GET", "OPTIONS"])
+        async def api_leaderboard():
+            if request.method == "OPTIONS":
+                return Response(status=204)
+            return await self.plugin.webui_leaderboard_api()
+
+        @self.app.route("/api/user_insight", methods=["GET", "OPTIONS"])
+        async def api_user_insight():
+            if request.method == "OPTIONS":
+                return Response(status=204)
+            return await self.plugin.webui_user_insight_api()

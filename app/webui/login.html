@@ -1,51 +1,59 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Oyasumi 登录</title>
+  <title>Oyasumi WebUI 登录</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link
-    href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,500,0,0&family=Roboto+Flex:wght@400;500;600;700&display=swap"
+    href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,400,0,0&family=Noto+Sans+SC:wght@300;400;500;700&display=swap"
     rel="stylesheet"
   />
   <link rel="stylesheet" href="/static/styles.css" />
 </head>
-<body>
-  <div class="bg-layer">
-    <div class="orb orb-a"></div>
-    <div class="orb orb-b"></div>
-    <div class="orb orb-c"></div>
+<body class="login-body">
+  <!-- 动态流体渐变背景 -->
+  <div class="mesh-bg" aria-hidden="true">
+    <div class="mesh-orb orb-1"></div>
+    <div class="mesh-orb orb-2"></div>
+    <div class="mesh-orb orb-3"></div>
+    <div class="mesh-overlay"></div>
   </div>
 
-  <main class="layout login-layout">
-    <section class="card login-card">
-      <div class="section-title">
-        <span class="material-symbols-rounded">shield_lock</span>
-        <h2>登录 Oyasumi WebUI</h2>
+  <main class="login-container">
+    <section class="md3-elevated-card login-card-premium">
+      <div class="login-header">
+        <div class="brand-badge">
+          <span class="material-symbols-rounded">nights_stay</span>
+        </div>
+        <p class="md3-overline">Oyasumi Access</p>
+        <h1 class="md3-headline">欢迎回来</h1>
+        <p class="md3-body-medium login-tip">
+          请输入您的配置项 <code>standalone_webui_token</code> 以访问群聊作息看板。
+        </p>
       </div>
-      <p class="section-desc">
-        请输入插件配置项 <code>standalone_webui_token</code> 进行登录。
-      </p>
 
-      <form id="login_form" class="fields login-fields">
-        <label class="field">
-          <span>访问令牌</span>
+      <form id="login_form" class="login-form-premium">
+        <div class="md3-text-field">
           <input
             id="login_token"
             type="password"
-            placeholder="请输入访问令牌（若配置为空可留空）"
             autocomplete="current-password"
+            placeholder=" "
+            required
           />
-        </label>
-        <button id="login_btn" type="submit" class="btn btn-filled">
-          <span class="material-symbols-rounded">login</span>
-          登录
+          <label for="login_token">访问口令</label>
+        </div>
+        <button id="login_btn" class="md3-fab-extended primary" type="submit">
+          <span class="material-symbols-rounded">arrow_forward</span>
+          <span>验证身份</span>
         </button>
       </form>
 
-      <p id="login_message" class="login-message"></p>
+      <div id="login_message_container" class="login-message-wrapper">
+        <p id="login_message" class="md3-body-small"></p>
+      </div>
     </section>
   </main>
 
