@@ -7,10 +7,9 @@ from typing import Any
 
 from quart import jsonify, request
 
-import astrbot.api.event.filter as filter
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.all import llm_tool
-from astrbot.api.event import AstrMessageEvent
+from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .app.config import PluginSettings, load_plugin_settings
@@ -205,6 +204,9 @@ class OyasumiPlugin(Star):
         ):
             yield event.plain_result("日期格式错误，请使用 YYYY-MM-DD。")
             return
+        if not self._is_date_range_order_valid(resolved_start, resolved_end):
+            yield event.plain_result("日期区间错误：end_date 不能早于 start_date。")
+            return
 
         target_user, can_query_other = self._resolve_target_user(event, target_user_id)
         if not can_query_other and target_user_id:
@@ -231,6 +233,9 @@ class OyasumiPlugin(Star):
             resolved_end
         ):
             yield event.plain_result("日期格式错误，请使用 YYYY-MM-DD。")
+            return
+        if not self._is_date_range_order_valid(resolved_start, resolved_end):
+            yield event.plain_result("日期区间错误：end_date 不能早于 start_date。")
             return
 
         target_user, can_query_other = self._resolve_target_user(event, target_user_id)
@@ -309,16 +314,19 @@ class OyasumiPlugin(Star):
             resolved_end
         ):
             return "日期格式错误，请使用 YYYY-MM-DD。"
+        if not self._is_date_range_order_valid(resolved_start, resolved_end):
+            return "日期区间错误：end_date 不能早于 start_date。"
 
         target_user, can_query_other = self._resolve_target_user(event, target_user_id)
+        note = ""
         if not can_query_other and target_user_id:
-            return "当前配置仅管理员可查询他人数据，已回退为查询当前用户。"
+            note = "当前配置仅管理员可查询他人数据，已回退为查询当前用户。\n"
         summary = await self.stats_service.build_summary(
             user_id=target_user,
             start_date=resolved_start,
             end_date=resolved_end,
         )
-        return summary.to_text(include_records_limit=20)
+        return note + summary.to_text(include_records_limit=20)
 
     @llm_tool(name="oyasumi_sleep_analysis")
     async def oyasumi_sleep_analysis(
@@ -437,6 +445,13 @@ class OyasumiPlugin(Star):
                     "message": "Invalid date format, expected YYYY-MM-DD",
                 }
             )
+        if not self._is_date_range_order_valid(resolved_start, resolved_end):
+            return jsonify(
+                {
+                    "status": "error",
+                    "message": "Invalid date range: end_date must be greater than or equal to start_date",
+                }
+            )
 
         summary = await self.stats_service.build_summary(
             user_id=user_id,
@@ -478,6 +493,13 @@ class OyasumiPlugin(Star):
                 {
                     "status": "error",
                     "message": "Invalid date format, expected YYYY-MM-DD",
+                }
+            )
+        if not self._is_date_range_order_valid(resolved_start, resolved_end):
+            return jsonify(
+                {
+                    "status": "error",
+                    "message": "Invalid date range: end_date must be greater than or equal to start_date",
                 }
             )
 
@@ -688,3 +710,12 @@ class OyasumiPlugin(Star):
             except Exception:
                 return False
         return False
+
+    @staticmethod
+    def _is_date_range_order_valid(start_date: str, end_date: str) -> bool:
+        try:
+            start_obj = datetime.strptime(start_date, "%Y-%m-%d").date()
+            end_obj = datetime.strptime(end_date, "%Y-%m-%d").date()
+        except ValueError:
+            return False
+        return end_obj >= start_obj

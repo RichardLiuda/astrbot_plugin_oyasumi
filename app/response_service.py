@@ -283,13 +283,13 @@ class ResponseService:
             "不要分点、不要标题、不要代码块、不要换行。"
             "语气温柔可爱，最多带一次“喵~”。"
         )
-        logger.info(
-            "[oyasumi] event llm request | user_id=%s | event=%s | provider=%s | system_prompt=%s | prompt=%s",
+        logger.debug(
+            "[oyasumi] event llm request | user_id=%s | event=%s | provider=%s | system_prompt_chars=%s | prompt_chars=%s",
             user_id,
             action_text,
             provider_id,
-            system_prompt,
-            prompt,
+            len(system_prompt or ""),
+            len(prompt or ""),
         )
         llm_text = await self._call_llm(
             provider_id=provider_id,
@@ -297,11 +297,12 @@ class ResponseService:
             prompt=prompt,
             scene="event_reply",
         )
-        logger.info(
-            "[oyasumi] event llm response | user_id=%s | event=%s | reply=%s",
+        logger.debug(
+            "[oyasumi] event llm response | user_id=%s | event=%s | has_reply=%s | reply_chars=%s",
             user_id,
             action_text,
-            llm_text or "<empty>",
+            bool(llm_text),
+            len(llm_text or ""),
         )
         return llm_text
 
@@ -385,7 +386,7 @@ class ResponseService:
         prompt: str,
         scene: str,
     ) -> str | None:
-        logger.info(
+        logger.debug(
             "[oyasumi] llm call start | scene=%s | provider=%s",
             scene,
             provider_id,
@@ -407,11 +408,12 @@ class ResponseService:
             )
             return None
         text = (getattr(response, "completion_text", "") or "").strip()
-        logger.info(
-            "[oyasumi] llm call end | scene=%s | provider=%s | response=%s",
+        logger.debug(
+            "[oyasumi] llm call end | scene=%s | provider=%s | has_response=%s | response_chars=%s",
             scene,
             provider_id,
-            text or "<empty>",
+            bool(text),
+            len(text or ""),
         )
         return text or None
 

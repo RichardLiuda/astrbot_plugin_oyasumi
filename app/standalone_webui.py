@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import hmac
 import secrets
-import socket
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -34,21 +33,16 @@ class StandaloneWebUIServer:
     async def start(self) -> None:
         if self._serve_task and not self._serve_task.done():
             return
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.settimeout(0.5)
-            if (
-                sock.connect_ex(
-                    (
-                        self.settings.standalone_webui_host,
-                        self.settings.standalone_webui_port,
-                    )
-                )
-                == 0
-            ):
-                raise RuntimeError(
-                    "standalone webui port already in use: "
-                    f"{self.settings.standalone_webui_host}:{self.settings.standalone_webui_port}"
-                )
+        if not str(self.settings.standalone_webui_token or "").strip():
+            raise RuntimeError(
+                "standalone_webui_token must be configured and non-empty"
+            )
+
+        if await self._is_port_in_use():
+            raise RuntimeError(
+                "standalone webui port already in use: "
+                f"{self.settings.standalone_webui_host}:{self.settings.standalone_webui_port}"
+            )
 
         config = HyperConfig()
         config.bind = [
@@ -120,12 +114,9 @@ class StandaloneWebUIServer:
 
     def _is_token_matched(self, provided: str) -> bool:
         configured = str(self.settings.standalone_webui_token or "")
+        if not configured.strip():
+            return False
         return hmac.compare_digest(provided, configured)
-
-    def _request_token(self) -> str:
-        header_token = (request.headers.get("X-Oyasumi-Token") or "").strip()
-        query_token = (request.args.get("token") or "").strip()
-        return header_token or query_token
 
     def _is_request_authenticated(self) -> bool:
         return self._is_cookie_session_valid()
@@ -146,15 +137,17 @@ class StandaloneWebUIServer:
                 return None
             if self._is_request_authenticated():
                 return None
-            return jsonify({"status": "error", "message": "invalid token"}), 401
+            return jsonify({"status": "error", "message": "unauthorized"}), 401
 
         @self.app.after_request
         async def _cors_headers(response: Response):
             if request.path.startswith("/api/"):
-                response.headers["Access-Control-Allow-Origin"] = "*"
-                response.headers["Access-Control-Allow-Headers"] = (
-                    "Content-Type, X-Oyasumi-Token"
-                )
+                origin = (request.headers.get("Origin") or "").strip()
+                allowed = self._get_allowed_cors_origins()
+                if origin and origin in allowed:
+                    response.headers["Access-Control-Allow-Origin"] = origin
+                    response.headers["Vary"] = "Origin"
+                response.headers["Access-Control-Allow-Headers"] = "Content-Type"
                 response.headers["Access-Control-Allow-Methods"] = "GET,POST,OPTIONS"
             return response
 
@@ -285,3 +278,26 @@ class StandaloneWebUIServer:
             if request.method == "OPTIONS":
                 return Response(status=204)
             return await self.plugin.webui_user_insight_api()
+
+    async def _is_port_in_use(self) -> bool:
+        host = str(self.settings.standalone_webui_host or "127.0.0.1")
+        port = int(self.settings.standalone_webui_port)
+        check_host = host if host not in {"0.0.0.0", "::"} else "127.0.0.1"
+        try:
+            _reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(check_host, port),
+                timeout=0.5,
+            )
+        except Exception:
+            return False
+        writer.close()
+        await writer.wait_closed()
+        return True
+
+    def _get_allowed_cors_origins(self) -> set[str]:
+        host = str(self.settings.standalone_webui_host or "127.0.0.1")
+        port = int(self.settings.standalone_webui_port)
+        candidates = {f"http://127.0.0.1:{port}", f"http://localhost:{port}"}
+        if host and host not in {"0.0.0.0", "::"}:
+            candidates.add(f"http://{host}:{port}")
+        return candidates

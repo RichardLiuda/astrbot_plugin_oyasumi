@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,12 @@ DATETIME_FMT = "%Y-%m-%d %H:%M:%S"
 
 def format_dt(dt: datetime) -> str:
     return dt.strftime(DATETIME_FMT)
+
+
+@dataclass(frozen=True)
+class ExecuteResult:
+    rowcount: int
+    lastrowid: int
 
 
 class OyasumiRepository:
@@ -62,12 +69,14 @@ class OyasumiRepository:
         params: tuple[Any, ...] = (),
         *,
         conn: aiosqlite.Connection | None = None,
-    ) -> aiosqlite.Cursor:
+    ) -> ExecuteResult:
         active_conn = conn or await self._require_conn()
-        cursor = await active_conn.execute(sql, params)
+        async with active_conn.execute(sql, params) as cursor:
+            rowcount = int(cursor.rowcount or 0)
+            lastrowid = int(cursor.lastrowid or 0)
         if conn is None:
             await active_conn.commit()
-        return cursor
+        return ExecuteResult(rowcount=rowcount, lastrowid=lastrowid)
 
     async def _fetch_one(
         self,
@@ -77,8 +86,8 @@ class OyasumiRepository:
         conn: aiosqlite.Connection | None = None,
     ) -> dict[str, Any] | None:
         active_conn = conn or await self._require_conn()
-        cursor = await active_conn.execute(sql, params)
-        row = await cursor.fetchone()
+        async with active_conn.execute(sql, params) as cursor:
+            row = await cursor.fetchone()
         return dict(row) if row else None
 
     async def _fetch_all(
@@ -89,8 +98,8 @@ class OyasumiRepository:
         conn: aiosqlite.Connection | None = None,
     ) -> list[dict[str, Any]]:
         active_conn = conn or await self._require_conn()
-        cursor = await active_conn.execute(sql, params)
-        rows = await cursor.fetchall()
+        async with active_conn.execute(sql, params) as cursor:
+            rows = await cursor.fetchall()
         return [dict(row) for row in rows]
 
     async def abandon_timeout_open_sessions(
@@ -100,7 +109,7 @@ class OyasumiRepository:
         *,
         conn: aiosqlite.Connection | None = None,
     ) -> int:
-        cursor = await self._execute(
+        result = await self._execute(
             """
             UPDATE sleep_session
             SET status='abandoned', updated_at=datetime('now', 'localtime')
@@ -112,7 +121,7 @@ class OyasumiRepository:
             (user_id, format_dt(threshold_dt)),
             conn=conn,
         )
-        return int(cursor.rowcount or 0)
+        return result.rowcount
 
     async def get_latest_open_session(
         self,
@@ -141,7 +150,7 @@ class OyasumiRepository:
         source: str = "regex",
         conn: aiosqlite.Connection | None = None,
     ) -> int:
-        cursor = await self._execute(
+        result = await self._execute(
             """
             INSERT INTO sleep_session (
                 user_id, sleep_time, wake_time, status, source,
@@ -152,7 +161,7 @@ class OyasumiRepository:
             (user_id, format_dt(sleep_time), source),
             conn=conn,
         )
-        return int(cursor.lastrowid)
+        return result.lastrowid
 
     async def update_open_session_sleep_time(
         self,
@@ -161,7 +170,7 @@ class OyasumiRepository:
         *,
         conn: aiosqlite.Connection | None = None,
     ) -> int:
-        cursor = await self._execute(
+        result = await self._execute(
             """
             UPDATE sleep_session
             SET sleep_time = ?, updated_at = datetime('now', 'localtime')
@@ -171,7 +180,7 @@ class OyasumiRepository:
             (format_dt(sleep_time), session_id),
             conn=conn,
         )
-        return int(cursor.rowcount or 0)
+        return result.rowcount
 
     async def close_session(
         self,
@@ -180,7 +189,7 @@ class OyasumiRepository:
         *,
         conn: aiosqlite.Connection | None = None,
     ) -> int:
-        cursor = await self._execute(
+        result = await self._execute(
             """
             UPDATE sleep_session
             SET wake_time = ?, status = 'closed', updated_at = datetime('now', 'localtime')
@@ -190,7 +199,7 @@ class OyasumiRepository:
             (format_dt(wake_time), session_id),
             conn=conn,
         )
-        return int(cursor.rowcount or 0)
+        return result.rowcount
 
     async def create_closed_session(
         self,
@@ -203,7 +212,7 @@ class OyasumiRepository:
         auto_fill_reason: str | None = None,
         conn: aiosqlite.Connection | None = None,
     ) -> int:
-        cursor = await self._execute(
+        result = await self._execute(
             """
             INSERT INTO sleep_session (
                 user_id, sleep_time, wake_time, status, source,
@@ -221,7 +230,7 @@ class OyasumiRepository:
             ),
             conn=conn,
         )
-        return int(cursor.lastrowid)
+        return result.lastrowid
 
     async def insert_event(
         self,
@@ -237,7 +246,7 @@ class OyasumiRepository:
         conn: aiosqlite.Connection | None = None,
     ) -> int:
         metadata_json = json.dumps(metadata or {}, ensure_ascii=False)
-        cursor = await self._execute(
+        result = await self._execute(
             """
             INSERT INTO sleep_event (
                 user_id, event_type, event_time, matched_pattern, raw_message,
@@ -257,7 +266,7 @@ class OyasumiRepository:
             ),
             conn=conn,
         )
-        return int(cursor.lastrowid)
+        return result.lastrowid
 
     async def get_open_session_count(
         self,
@@ -295,7 +304,7 @@ class OyasumiRepository:
         source: str = "manual_edit",
         conn: aiosqlite.Connection | None = None,
     ) -> int:
-        cursor = await self._execute(
+        result = await self._execute(
             """
             UPDATE sleep_session
             SET sleep_time = ?,
@@ -314,7 +323,7 @@ class OyasumiRepository:
             ),
             conn=conn,
         )
-        return int(cursor.rowcount or 0)
+        return result.rowcount
 
     async def list_sessions(
         self,

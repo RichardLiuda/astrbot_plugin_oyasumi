@@ -360,7 +360,11 @@ def resolve_date_range(start_date: str = "", end_date: str = "") -> tuple[str, s
         end = today
         return (start_date, end.strftime("%Y-%m-%d"))
     if end_date and not start_date:
-        start = today - timedelta(days=6)
+        try:
+            end_obj = datetime.strptime(end_date, "%Y-%m-%d").date()
+            start = end_obj - timedelta(days=6)
+        except ValueError:
+            start = today - timedelta(days=6)
         return (start.strftime("%Y-%m-%d"), end_date)
     return (start_date, end_date)
 
