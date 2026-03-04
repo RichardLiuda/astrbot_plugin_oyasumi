@@ -158,8 +158,8 @@
   },
   "standalone_webui_token": {
     "type": "string",
-    "description": "独立 WebUI 访问令牌（可为空）",
+    "description": "独立 WebUI 登录令牌（建议设置）",
     "default": "",
-    "hint": "配置后，页面请求需携带该令牌"
+    "hint": "WebUI 始终需要登录；此项为空时可空口令登录，建议设置高强度随机字符串"
   }
 }

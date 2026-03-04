@@ -30,6 +30,10 @@
           <span class="material-symbols-rounded">monitoring</span>
           <span id="status_text">就绪</span>
         </div>
+        <button id="logout_btn" class="btn btn-tonal" hidden>
+          <span class="material-symbols-rounded">logout</span>
+          退出
+        </button>
         <button id="refresh_btn" class="btn btn-filled">
           <span class="material-symbols-rounded">refresh</span>
           刷新
@@ -43,10 +47,6 @@
         <h2>筛选条件</h2>
       </div>
       <div class="fields">
-        <label class="field">
-          <span>访问令牌（可选）</span>
-          <input id="token" type="password" placeholder="与 standalone_webui_token 一致" autocomplete="off" />
-        </label>
         <label class="field">
           <span>用户</span>
           <select id="user_id">

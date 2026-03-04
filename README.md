@@ -94,10 +94,16 @@ uv pip install -r data/plugins/astrbot_plugin_oyasumi/requirements.txt
 - `standalone_webui_enabled`: `true`
 - `standalone_webui_host`: `127.0.0.1`
 - `standalone_webui_port`: `6196`
-- `standalone_webui_token`: `""`（为空表示不鉴权）
+- `standalone_webui_token`: `""`（建议设置为强随机字符串）
 
 启动插件后直接访问：
 - `http://127.0.0.1:6196/`
+
+安全说明：
+- 无论 `standalone_webui_token` 是否为空，访问根路径都会先进入登录页 `/login`
+- 登录成功后服务端会下发 HttpOnly 会话 Cookie，后续请求无需在页面中重复输入 token
+- 可通过页面右上角“退出”按钮主动注销会话
+- 若 token 为空，登录页可直接空口令登录，仅有“会话门禁”效果，不具备口令安全性
 
 如需局域网访问：
 - 将 `standalone_webui_host` 改为 `0.0.0.0`

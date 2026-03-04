@@ -1,13 +1,13 @@
 const $ = (id) => document.getElementById(id);
 
 const els = {
-  token: $("token"),
   userId: $("user_id"),
   days: $("days"),
   limit: $("limit"),
   startDate: $("start_date"),
   endDate: $("end_date"),
   refreshBtn: $("refresh_btn"),
+  logoutBtn: $("logout_btn"),
   analysisBtn: $("analysis_btn"),
   statusText: $("status_text"),
   metrics: $("metrics"),
@@ -191,10 +191,6 @@ function inlineMarkdown(text) {
   return out;
 }
 
-function getToken() {
-  return els.token.value.trim();
-}
-
 function getBaseParams() {
   return {
     user_id: els.userId.value,
@@ -225,10 +221,6 @@ function notify(message, type = "info") {
 
 async function api(path, method = "GET", body = null) {
   const headers = {};
-  const token = getToken();
-  if (token) {
-    headers["X-Oyasumi-Token"] = token;
-  }
   if (body !== null) {
     headers["Content-Type"] = "application/json";
   }
@@ -236,8 +228,13 @@ async function api(path, method = "GET", body = null) {
   const response = await fetch(path, {
     method,
     headers,
+    credentials: "same-origin",
     body: body === null ? null : JSON.stringify(body),
   });
+  if (response.status === 401) {
+    window.location.href = "/login";
+    throw new Error("未登录或登录已过期");
+  }
 
   let payload = null;
   try {
@@ -252,6 +249,20 @@ async function api(path, method = "GET", body = null) {
     throw new Error(payload?.message || `HTTP ${response.status}`);
   }
   return payload.data;
+}
+
+async function checkAuthStatus() {
+  const data = await api("/api/auth/status");
+  const requireLogin = Boolean(data.require_login);
+  const authed = Boolean(data.authenticated);
+  if (els.logoutBtn) {
+    els.logoutBtn.hidden = !requireLogin;
+  }
+  if (requireLogin && !authed) {
+    window.location.href = "/login";
+    return false;
+  }
+  return true;
 }
 
 function minutesText(value) {
@@ -586,27 +597,37 @@ async function generateAnalysis() {
     setLoading(false);
   }
 }
-function bindEvents() {
-  els.refreshBtn.addEventListener("click", refreshAll);
-  els.analysisBtn.addEventListener("click", generateAnalysis);
-  els.token.addEventListener("change", () => {
-    localStorage.setItem("oyasumi-webui-token", getToken());
-  });
-}
 
-function restoreToken() {
-  const saved = localStorage.getItem("oyasumi-webui-token");
-  if (saved) {
-    els.token.value = saved;
+async function logout() {
+  setLoading(true);
+  try {
+    await api("/api/auth/logout", "POST", {});
+  } catch (_err) {
+    // Ignore and force redirect to login page.
+  } finally {
+    window.location.href = "/login";
   }
 }
 
-function bootstrap() {
-  initDates();
-  restoreToken();
-  bindEvents();
-  renderAnalysisMarkdown("");
-  refreshAll();
+function bindEvents() {
+  els.refreshBtn.addEventListener("click", refreshAll);
+  els.analysisBtn.addEventListener("click", generateAnalysis);
+  if (els.logoutBtn) {
+    els.logoutBtn.addEventListener("click", logout);
+  }
 }
 
-bootstrap();
+async function bootstrap() {
+  initDates();
+  bindEvents();
+  renderAnalysisMarkdown("");
+  const canContinue = await checkAuthStatus();
+  if (!canContinue) {
+    return;
+  }
+  await refreshAll();
+}
+
+bootstrap().catch((err) => {
+  notify(err.message || String(err), "error");
+});

@@ -614,6 +614,43 @@ tbody tr:hover {
   pointer-events: none;
 }
 
+.login-layout {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+}
+
+.login-card {
+  width: min(460px, 100%);
+  border-radius: var(--radius-xl);
+}
+
+.login-fields {
+  grid-template-columns: 1fr;
+  margin-top: 14px;
+}
+
+.login-fields .btn {
+  width: 100%;
+  justify-content: center;
+}
+
+.login-message {
+  margin: 12px 2px 0;
+  min-height: 20px;
+  font-size: 13px;
+  color: var(--md-muted);
+}
+
+.login-message.error {
+  color: var(--md-error);
+}
+
+.btn.is-loading {
+  opacity: 0.7;
+  pointer-events: none;
+}
+
 @media (max-width: 1050px) {
   .visual-grid {
     grid-template-columns: 1fr;

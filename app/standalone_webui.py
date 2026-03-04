@@ -1,20 +1,27 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
+import secrets
 import socket
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 from hypercorn.asyncio import serve
 from hypercorn.config import Config as HyperConfig
-from quart import Quart, Response, jsonify, request, send_from_directory
+from quart import Quart, Response, jsonify, redirect, request, send_from_directory
 
 
 class StandaloneWebUIServer:
+    _SESSION_COOKIE_NAME = "oyasumi_webui_session"
+    _SESSION_TTL = timedelta(hours=12)
+
     def __init__(self, plugin: Any):
         self.plugin = plugin
         self.settings = plugin.settings
         self.webui_dir = Path(__file__).resolve().parent / "webui"
+        self._sessions: dict[str, datetime] = {}
         self.app = Quart(
             "oyasumi_standalone_webui",
             static_folder=str(self.webui_dir),
@@ -80,6 +87,54 @@ class StandaloneWebUIServer:
     async def _shutdown_trigger(self) -> None:
         await self._shutdown_event.wait()
 
+    def _utcnow(self) -> datetime:
+        return datetime.now(timezone.utc)
+
+    def _cleanup_expired_sessions(self) -> None:
+        now = self._utcnow()
+        expired = [sid for sid, expiry in self._sessions.items() if expiry <= now]
+        for sid in expired:
+            self._sessions.pop(sid, None)
+
+    def _create_session(self) -> str:
+        self._cleanup_expired_sessions()
+        session_id = secrets.token_urlsafe(32)
+        self._sessions[session_id] = self._utcnow() + self._SESSION_TTL
+        return session_id
+
+    def _read_cookie_session_id(self) -> str:
+        return (request.cookies.get(self._SESSION_COOKIE_NAME) or "").strip()
+
+    def _is_cookie_session_valid(self) -> bool:
+        self._cleanup_expired_sessions()
+        session_id = self._read_cookie_session_id()
+        if not session_id:
+            return False
+        expiry = self._sessions.get(session_id)
+        if expiry is None:
+            return False
+        if expiry <= self._utcnow():
+            self._sessions.pop(session_id, None)
+            return False
+        return True
+
+    def _is_token_matched(self, provided: str) -> bool:
+        configured = str(self.settings.standalone_webui_token or "")
+        return hmac.compare_digest(provided, configured)
+
+    def _request_token(self) -> str:
+        header_token = (request.headers.get("X-Oyasumi-Token") or "").strip()
+        query_token = (request.args.get("token") or "").strip()
+        return header_token or query_token
+
+    def _is_request_authenticated(self) -> bool:
+        return self._is_cookie_session_valid()
+
+    def _delete_current_session(self) -> None:
+        session_id = self._read_cookie_session_id()
+        if session_id:
+            self._sessions.pop(session_id, None)
+
     def _register_routes(self) -> None:
         @self.app.before_request
         async def _auth_guard():
@@ -87,12 +142,9 @@ class StandaloneWebUIServer:
                 return None
             if not request.path.startswith("/api/"):
                 return None
-            if not self.settings.standalone_webui_token:
+            if request.path in {"/api/auth/status", "/api/auth/login"}:
                 return None
-            header_token = (request.headers.get("X-Oyasumi-Token") or "").strip()
-            query_token = (request.args.get("token") or "").strip()
-            provided = header_token or query_token
-            if provided == self.settings.standalone_webui_token:
+            if self._is_request_authenticated():
                 return None
             return jsonify({"status": "error", "message": "invalid token"}), 401
 
@@ -108,11 +160,77 @@ class StandaloneWebUIServer:
 
         @self.app.route("/", methods=["GET"])
         async def index_page():
+            if not self._is_request_authenticated():
+                return redirect("/login")
             return await send_from_directory(str(self.webui_dir), "index.html")
+
+        @self.app.route("/login", methods=["GET"])
+        async def login_page():
+            if self._is_request_authenticated():
+                return redirect("/")
+            return await send_from_directory(str(self.webui_dir), "login.html")
 
         @self.app.route("/healthz", methods=["GET"])
         async def healthz():
             return jsonify({"status": "ok"})
+
+        @self.app.route("/api/auth/status", methods=["GET", "OPTIONS"])
+        async def api_auth_status():
+            if request.method == "OPTIONS":
+                return Response(status=204)
+            require_login = True
+            authenticated = self._is_request_authenticated()
+            return jsonify(
+                {
+                    "status": "ok",
+                    "data": {
+                        "require_login": require_login,
+                        "authenticated": authenticated,
+                    },
+                }
+            )
+
+        @self.app.route("/api/auth/login", methods=["POST", "OPTIONS"])
+        async def api_auth_login():
+            if request.method == "OPTIONS":
+                return Response(status=204)
+
+            payload = await request.get_json(silent=True) or {}
+            provided = str(payload.get("token") or "")
+            if not self._is_token_matched(provided):
+                return (
+                    jsonify({"status": "error", "message": "token mismatch"}),
+                    401,
+                )
+
+            session_id = self._create_session()
+            response = jsonify(
+                {
+                    "status": "ok",
+                    "data": {
+                        "require_login": True,
+                        "authenticated": True,
+                    },
+                }
+            )
+            response.set_cookie(
+                self._SESSION_COOKIE_NAME,
+                session_id,
+                max_age=int(self._SESSION_TTL.total_seconds()),
+                httponly=True,
+                secure=(request.scheme == "https"),
+                samesite="Lax",
+            )
+            return response
+
+        @self.app.route("/api/auth/logout", methods=["POST", "OPTIONS"])
+        async def api_auth_logout():
+            if request.method == "OPTIONS":
+                return Response(status=204)
+            self._delete_current_session()
+            response = jsonify({"status": "ok", "data": {"authenticated": False}})
+            response.delete_cookie(self._SESSION_COOKIE_NAME)
+            return response
 
         @self.app.route("/api/users", methods=["GET", "OPTIONS"])
         async def api_users():
