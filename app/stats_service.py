@@ -221,7 +221,11 @@ class StatsService:
         limit: int = 10,
         metric: str = "activity",
     ) -> dict[str, Any]:
-        selected_metric = metric if metric == "activity" else "activity"
+        selected_metric = (metric or "activity").strip().lower()
+        if selected_metric != "activity":
+            raise ValueError(
+                "unsupported metric, currently only 'activity' is supported"
+            )
         items = await self.repository.query_leaderboard_activity(
             start_date=start_date,
             end_date=end_date,

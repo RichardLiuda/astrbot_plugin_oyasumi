@@ -30,7 +30,7 @@ class OyasumiRepository:
         self.db_path = Path(db_path)
         self.init_sql_path = Path(init_sql_path)
         self._conn: aiosqlite.Connection | None = None
-        self._tx_lock = asyncio.Lock()
+        self._db_lock = asyncio.Lock()
 
     async def initialize(self) -> None:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -54,7 +54,7 @@ class OyasumiRepository:
     @asynccontextmanager
     async def transaction(self):
         conn = await self._require_conn()
-        async with self._tx_lock:
+        async with self._db_lock:
             await conn.execute("BEGIN")
             try:
                 yield conn
@@ -70,13 +70,19 @@ class OyasumiRepository:
         *,
         conn: aiosqlite.Connection | None = None,
     ) -> ExecuteResult:
-        active_conn = conn or await self._require_conn()
-        async with active_conn.execute(sql, params) as cursor:
-            rowcount = int(cursor.rowcount or 0)
-            lastrowid = int(cursor.lastrowid or 0)
-        if conn is None:
+        if conn is not None:
+            async with conn.execute(sql, params) as cursor:
+                rowcount = int(cursor.rowcount or 0)
+                lastrowid = int(cursor.lastrowid or 0)
+            return ExecuteResult(rowcount=rowcount, lastrowid=lastrowid)
+
+        async with self._db_lock:
+            active_conn = await self._require_conn()
+            async with active_conn.execute(sql, params) as cursor:
+                rowcount = int(cursor.rowcount or 0)
+                lastrowid = int(cursor.lastrowid or 0)
             await active_conn.commit()
-        return ExecuteResult(rowcount=rowcount, lastrowid=lastrowid)
+            return ExecuteResult(rowcount=rowcount, lastrowid=lastrowid)
 
     async def _fetch_one(
         self,
@@ -85,10 +91,16 @@ class OyasumiRepository:
         *,
         conn: aiosqlite.Connection | None = None,
     ) -> dict[str, Any] | None:
-        active_conn = conn or await self._require_conn()
-        async with active_conn.execute(sql, params) as cursor:
-            row = await cursor.fetchone()
-        return dict(row) if row else None
+        if conn is not None:
+            async with conn.execute(sql, params) as cursor:
+                row = await cursor.fetchone()
+            return dict(row) if row else None
+
+        async with self._db_lock:
+            active_conn = await self._require_conn()
+            async with active_conn.execute(sql, params) as cursor:
+                row = await cursor.fetchone()
+            return dict(row) if row else None
 
     async def _fetch_all(
         self,
@@ -97,10 +109,16 @@ class OyasumiRepository:
         *,
         conn: aiosqlite.Connection | None = None,
     ) -> list[dict[str, Any]]:
-        active_conn = conn or await self._require_conn()
-        async with active_conn.execute(sql, params) as cursor:
-            rows = await cursor.fetchall()
-        return [dict(row) for row in rows]
+        if conn is not None:
+            async with conn.execute(sql, params) as cursor:
+                rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+        async with self._db_lock:
+            active_conn = await self._require_conn()
+            async with active_conn.execute(sql, params) as cursor:
+                rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
 
     async def abandon_timeout_open_sessions(
         self,

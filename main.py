@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from quart import jsonify, request
+from quart import g, jsonify, request
 
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.all import llm_tool
@@ -65,6 +66,7 @@ class OyasumiPlugin(Star):
         self.response_service.bind_repository(self.repository)
         self.snapshot_service = SnapshotService(self.settings.snapshot_path)
         self.standalone_webui_server: StandaloneWebUIServer | None = None
+        self._background_tasks: set[asyncio.Task[None]] = set()
 
     async def initialize(self) -> None:
         await self.repository.initialize()
@@ -84,6 +86,12 @@ class OyasumiPlugin(Star):
         )
 
     async def terminate(self) -> None:
+        if self._background_tasks:
+            pending = list(self._background_tasks)
+            self._background_tasks.clear()
+            for task in pending:
+                task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
         if self.standalone_webui_server is not None:
             await self.standalone_webui_server.stop()
             self.standalone_webui_server = None
@@ -123,15 +131,10 @@ class OyasumiPlugin(Star):
             user_name=user_name,
             result=process_result,
         )
-        dashboard = await self.stats_service.build_dashboard(
-            user_id=user_id, recent_days=7
-        )
-        snapshot_payload = self.snapshot_service.build_event_snapshot(
+        self._schedule_snapshot_refresh(
             user_id=user_id,
-            dashboard=dashboard,
             last_action=process_result.action,
         )
-        self.snapshot_service.safe_write(snapshot_payload)
 
         if reply:
             yield event.plain_result(reply)
@@ -409,6 +412,9 @@ class OyasumiPlugin(Star):
         )
 
     async def webui_users_api(self):
+        unauthorized = self._require_web_api_auth()
+        if unauthorized is not None:
+            return unauthorized
         limit = self._safe_int(
             request.args.get("limit"), default=200, minimum=1, maximum=1000
         )
@@ -416,6 +422,9 @@ class OyasumiPlugin(Star):
         return jsonify({"status": "ok", "data": {"user_ids": user_ids}})
 
     async def webui_dashboard_api(self):
+        unauthorized = self._require_web_api_auth()
+        if unauthorized is not None:
+            return unauthorized
         user_id = (request.args.get("user_id", "") or "").strip() or None
         days = self._safe_int(
             request.args.get("days"), default=7, minimum=1, maximum=60
@@ -424,6 +433,9 @@ class OyasumiPlugin(Star):
         return jsonify({"status": "ok", "data": data})
 
     async def webui_sessions_api(self):
+        unauthorized = self._require_web_api_auth()
+        if unauthorized is not None:
+            return unauthorized
         user_id = (request.args.get("user_id", "") or "").strip() or None
         limit = self._safe_int(
             request.args.get("limit"), default=20, minimum=1, maximum=100
@@ -432,6 +444,9 @@ class OyasumiPlugin(Star):
         return jsonify({"status": "ok", "data": {"sessions": rows}})
 
     async def webui_summary_api(self):
+        unauthorized = self._require_web_api_auth()
+        if unauthorized is not None:
+            return unauthorized
         user_id = (request.args.get("user_id", "") or "").strip() or None
         start_date = (request.args.get("start_date", "") or "").strip()
         end_date = (request.args.get("end_date", "") or "").strip()
@@ -480,6 +495,9 @@ class OyasumiPlugin(Star):
         )
 
     async def webui_analysis_api(self):
+        unauthorized = self._require_web_api_auth()
+        if unauthorized is not None:
+            return unauthorized
         payload = await request.get_json(silent=True) or {}
         user_id = (payload.get("user_id", "") or "").strip() or None
         start_date = (payload.get("start_date", "") or "").strip()
@@ -534,6 +552,9 @@ class OyasumiPlugin(Star):
         )
 
     async def webui_snapshot_api(self):
+        unauthorized = self._require_web_api_auth()
+        if unauthorized is not None:
+            return unauthorized
         if not self.settings.snapshot_path.exists():
             return jsonify({"status": "ok", "data": {"snapshot": None}})
         try:
@@ -544,6 +565,9 @@ class OyasumiPlugin(Star):
         return jsonify({"status": "ok", "data": {"snapshot": payload}})
 
     async def webui_overview_api(self):
+        unauthorized = self._require_web_api_auth()
+        if unauthorized is not None:
+            return unauthorized
         start_date, end_date, error = self._resolve_web_date_range(
             days_value=request.args.get("days"),
             start_date=(request.args.get("start_date", "") or "").strip(),
@@ -559,6 +583,9 @@ class OyasumiPlugin(Star):
         return jsonify({"status": "ok", "data": data})
 
     async def webui_leaderboard_api(self):
+        unauthorized = self._require_web_api_auth()
+        if unauthorized is not None:
+            return unauthorized
         start_date, end_date, error = self._resolve_web_date_range(
             days_value=request.args.get("days"),
             start_date=(request.args.get("start_date", "") or "").strip(),
@@ -574,15 +601,21 @@ class OyasumiPlugin(Star):
             maximum=100,
         )
         metric = (request.args.get("metric", "activity") or "activity").strip().lower()
-        data = await self.stats_service.build_leaderboard(
-            start_date=start_date,
-            end_date=end_date,
-            limit=limit,
-            metric=metric,
-        )
+        try:
+            data = await self.stats_service.build_leaderboard(
+                start_date=start_date,
+                end_date=end_date,
+                limit=limit,
+                metric=metric,
+            )
+        except ValueError as exc:
+            return jsonify({"status": "error", "message": str(exc)})
         return jsonify({"status": "ok", "data": data})
 
     async def webui_user_insight_api(self):
+        unauthorized = self._require_web_api_auth()
+        if unauthorized is not None:
+            return unauthorized
         user_id = (request.args.get("user_id", "") or "").strip()
         if not user_id:
             return jsonify({"status": "error", "message": "user_id is required"})
@@ -702,6 +735,14 @@ class OyasumiPlugin(Star):
             return sender_id, False
         return target_user_id, True
 
+    def _require_web_api_auth(self):
+        request_path = request.path or ""
+        if not request_path.startswith("/api/plug/"):
+            return None
+        if getattr(g, "username", None):
+            return None
+        return jsonify({"status": "error", "message": "unauthorized"}), 401
+
     def _is_admin(self, event: AstrMessageEvent) -> bool:
         is_admin_callable = getattr(event, "is_admin", None)
         if callable(is_admin_callable):
@@ -710,6 +751,34 @@ class OyasumiPlugin(Star):
             except Exception:
                 return False
         return False
+
+    def _schedule_snapshot_refresh(self, *, user_id: str, last_action: str) -> None:
+        task = asyncio.create_task(
+            self._refresh_snapshot(user_id=user_id, last_action=last_action)
+        )
+        self._background_tasks.add(task)
+        task.add_done_callback(self._on_background_task_done)
+
+    def _on_background_task_done(self, task: asyncio.Task[None]) -> None:
+        self._background_tasks.discard(task)
+        try:
+            task.result()
+        except asyncio.CancelledError:
+            pass
+        except Exception as exc:
+            logger.warning("[oyasumi] snapshot refresh failed: %s", exc)
+
+    async def _refresh_snapshot(self, *, user_id: str, last_action: str) -> None:
+        dashboard = await self.stats_service.build_dashboard(
+            user_id=user_id,
+            recent_days=7,
+        )
+        snapshot_payload = self.snapshot_service.build_event_snapshot(
+            user_id=user_id,
+            dashboard=dashboard,
+            last_action=last_action,
+        )
+        self.snapshot_service.safe_write(snapshot_payload)
 
     @staticmethod
     def _is_date_range_order_valid(start_date: str, end_date: str) -> bool:

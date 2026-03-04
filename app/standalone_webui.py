@@ -15,12 +15,17 @@ from quart import Quart, Response, jsonify, redirect, request, send_from_directo
 class StandaloneWebUIServer:
     _SESSION_COOKIE_NAME = "oyasumi_webui_session"
     _SESSION_TTL = timedelta(hours=12)
+    _LOGIN_WINDOW = timedelta(minutes=10)
+    _LOGIN_LOCKOUT = timedelta(minutes=10)
+    _LOGIN_MAX_ATTEMPTS = 8
 
     def __init__(self, plugin: Any):
         self.plugin = plugin
         self.settings = plugin.settings
         self.webui_dir = Path(__file__).resolve().parent / "webui"
         self._sessions: dict[str, datetime] = {}
+        self._login_attempts: dict[str, list[datetime]] = {}
+        self._login_lockouts: dict[str, datetime] = {}
         self.app = Quart(
             "oyasumi_standalone_webui",
             static_folder=str(self.webui_dir),
@@ -121,6 +126,59 @@ class StandaloneWebUIServer:
     def _is_request_authenticated(self) -> bool:
         return self._is_cookie_session_valid()
 
+    def _get_client_ip(self) -> str:
+        forwarded_for = (request.headers.get("X-Forwarded-For") or "").strip()
+        if forwarded_for:
+            first_hop = forwarded_for.split(",")[0].strip()
+            if first_hop:
+                return first_hop
+        return (request.remote_addr or "unknown").strip() or "unknown"
+
+    def _cleanup_login_attempts(self, client_ip: str) -> None:
+        now = self._utcnow()
+        recent = [
+            ts
+            for ts in self._login_attempts.get(client_ip, [])
+            if now - ts <= self._LOGIN_WINDOW
+        ]
+        if recent:
+            self._login_attempts[client_ip] = recent
+        else:
+            self._login_attempts.pop(client_ip, None)
+
+        lockout_until = self._login_lockouts.get(client_ip)
+        if lockout_until and lockout_until <= now:
+            self._login_lockouts.pop(client_ip, None)
+
+    def _is_login_rate_limited(self, client_ip: str) -> bool:
+        self._cleanup_login_attempts(client_ip)
+        lockout_until = self._login_lockouts.get(client_ip)
+        if lockout_until and lockout_until > self._utcnow():
+            return True
+        return False
+
+    def _record_login_failure(self, client_ip: str) -> None:
+        now = self._utcnow()
+        self._cleanup_login_attempts(client_ip)
+        attempts = self._login_attempts.setdefault(client_ip, [])
+        attempts.append(now)
+        if len(attempts) >= self._LOGIN_MAX_ATTEMPTS:
+            self._login_lockouts[client_ip] = now + self._LOGIN_LOCKOUT
+            self._login_attempts.pop(client_ip, None)
+
+    def _clear_login_failures(self, client_ip: str) -> None:
+        self._login_attempts.pop(client_ip, None)
+        self._login_lockouts.pop(client_ip, None)
+
+    def _is_request_secure(self) -> bool:
+        if request.scheme == "https":
+            return True
+        forwarded_proto = (request.headers.get("X-Forwarded-Proto") or "").strip()
+        if forwarded_proto:
+            first_hop = forwarded_proto.split(",")[0].strip().lower()
+            return first_hop == "https"
+        return False
+
     def _delete_current_session(self) -> None:
         session_id = self._read_cookie_session_id()
         if session_id:
@@ -188,14 +246,23 @@ class StandaloneWebUIServer:
             if request.method == "OPTIONS":
                 return Response(status=204)
 
+            client_ip = self._get_client_ip()
+            if self._is_login_rate_limited(client_ip):
+                return (
+                    jsonify({"status": "error", "message": "too many login attempts"}),
+                    429,
+                )
+
             payload = await request.get_json(silent=True) or {}
             provided = str(payload.get("token") or "")
             if not self._is_token_matched(provided):
+                self._record_login_failure(client_ip)
                 return (
                     jsonify({"status": "error", "message": "token mismatch"}),
                     401,
                 )
 
+            self._clear_login_failures(client_ip)
             session_id = self._create_session()
             response = jsonify(
                 {
@@ -211,7 +278,7 @@ class StandaloneWebUIServer:
                 session_id,
                 max_age=int(self._SESSION_TTL.total_seconds()),
                 httponly=True,
-                secure=(request.scheme == "https"),
+                secure=self._is_request_secure(),
                 samesite="Lax",
             )
             return response
@@ -297,7 +364,13 @@ class StandaloneWebUIServer:
     def _get_allowed_cors_origins(self) -> set[str]:
         host = str(self.settings.standalone_webui_host or "127.0.0.1")
         port = int(self.settings.standalone_webui_port)
-        candidates = {f"http://127.0.0.1:{port}", f"http://localhost:{port}"}
+        candidates = {
+            f"http://127.0.0.1:{port}",
+            f"http://localhost:{port}",
+            f"https://127.0.0.1:{port}",
+            f"https://localhost:{port}",
+        }
         if host and host not in {"0.0.0.0", "::"}:
             candidates.add(f"http://{host}:{port}")
+            candidates.add(f"https://{host}:{port}")
         return candidates

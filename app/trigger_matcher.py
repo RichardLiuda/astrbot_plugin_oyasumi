@@ -10,6 +10,9 @@ from .config import PluginSettings
 
 EVENT_GOOD_MORNING = "good_morning"
 EVENT_GOOD_NIGHT = "good_night"
+MAX_PATTERN_LENGTH = 128
+MAX_QUANTIFIER_COUNT = 12
+MAX_MATCH_TEXT_LENGTH = 256
 
 
 @dataclass(frozen=True)
@@ -46,6 +49,8 @@ class TriggerMatcher:
         normalized = self.normalize_text(text)
         if not normalized:
             return None
+        if len(normalized) > MAX_MATCH_TEXT_LENGTH:
+            normalized = normalized[:MAX_MATCH_TEXT_LENGTH]
 
         for pattern_text, pattern in self._night_patterns:
             if pattern.search(normalized):
@@ -72,6 +77,13 @@ class TriggerMatcher:
     ) -> list[tuple[str, re.Pattern[str]]]:
         compiled: list[tuple[str, re.Pattern[str]]] = []
         for pattern_text in patterns:
+            if not self._is_pattern_safe(pattern_text):
+                logger.warning(
+                    "[oyasumi] unsafe %s pattern skipped: %s",
+                    pattern_group_name,
+                    pattern_text,
+                )
+                continue
             try:
                 compiled.append((pattern_text, re.compile(pattern_text, flags)))
             except re.error as exc:
@@ -82,3 +94,21 @@ class TriggerMatcher:
                     exc,
                 )
         return compiled
+
+    def _is_pattern_safe(self, pattern_text: str) -> bool:
+        if not pattern_text or len(pattern_text) > MAX_PATTERN_LENGTH:
+            return False
+
+        quantifier_count = len(re.findall(r"[*+?]|\{\d+(?:,\d*)?\}", pattern_text))
+        if quantifier_count > MAX_QUANTIFIER_COUNT:
+            return False
+
+        # Heuristic guards for catastrophic backtracking hotspots.
+        if re.search(r"\([^)]*[*+][^)]*\)[*+]", pattern_text):
+            return False
+        if re.search(r"\.\*.*\.\*", pattern_text):
+            return False
+        if re.search(r"\\[1-9]", pattern_text):
+            return False
+
+        return True
