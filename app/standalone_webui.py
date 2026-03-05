@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import http.client
 import secrets
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -11,6 +12,8 @@ from hypercorn.asyncio import serve
 from hypercorn.config import Config as HyperConfig
 from quart import Quart, Response, jsonify, redirect, request, send_from_directory
 
+from astrbot.api import logger
+
 
 class StandaloneWebUIServer:
     _SESSION_COOKIE_NAME = "oyasumi_webui_session"
@@ -18,6 +21,10 @@ class StandaloneWebUIServer:
     _LOGIN_WINDOW = timedelta(minutes=10)
     _LOGIN_LOCKOUT = timedelta(minutes=10)
     _LOGIN_MAX_ATTEMPTS = 8
+    _START_RECOVERY_TIMEOUT_SEC = 10.0
+    _START_RECOVERY_STEP_SEC = 0.25
+    _INTERNAL_SHUTDOWN_PATH = "/__oyasumi_internal/shutdown"
+    _INTERNAL_SHUTDOWN_HEADER = "X-Oyasumi-Shutdown-Token"
 
     def __init__(self, plugin: Any):
         self.plugin = plugin
@@ -44,10 +51,17 @@ class StandaloneWebUIServer:
             )
 
         if await self._is_port_in_use():
-            raise RuntimeError(
-                "standalone webui port already in use: "
-                f"{self.settings.standalone_webui_host}:{self.settings.standalone_webui_port}"
+            logger.warning(
+                "[oyasumi] standalone webui port is occupied, trying graceful recovery: %s:%s",
+                self.settings.standalone_webui_host,
+                self.settings.standalone_webui_port,
             )
+            recovered = await self._recover_occupied_port()
+            if not recovered:
+                raise RuntimeError(
+                    "standalone webui port already in use: "
+                    f"{self.settings.standalone_webui_host}:{self.settings.standalone_webui_port}"
+                )
 
         config = HyperConfig()
         config.bind = [
@@ -72,14 +86,17 @@ class StandaloneWebUIServer:
 
         self._shutdown_event.set()
         try:
-            await asyncio.wait_for(self._serve_task, timeout=5)
-        except Exception:
+            await asyncio.wait_for(self._serve_task, timeout=8)
+        except asyncio.TimeoutError:
+            logger.warning("[oyasumi] standalone webui stop timeout, force cancel task")
             if not self._serve_task.done():
                 self._serve_task.cancel()
                 try:
                     await self._serve_task
                 except BaseException:
                     pass
+        except Exception as exc:
+            logger.warning("[oyasumi] standalone webui stop failed: %s", exc)
         finally:
             self._serve_task = None
 
@@ -185,6 +202,16 @@ class StandaloneWebUIServer:
             self._sessions.pop(session_id, None)
 
     def _register_routes(self) -> None:
+        @self.app.route(self._INTERNAL_SHUTDOWN_PATH, methods=["POST"])
+        async def internal_shutdown():
+            provided = (
+                request.headers.get(self._INTERNAL_SHUTDOWN_HEADER) or ""
+            ).strip()
+            if not self._is_token_matched(provided):
+                return jsonify({"status": "error", "message": "unauthorized"}), 401
+            asyncio.create_task(self._trigger_internal_shutdown())
+            return jsonify({"status": "ok"})
+
         @self.app.before_request
         async def _auth_guard():
             if request.method == "OPTIONS":
@@ -347,12 +374,11 @@ class StandaloneWebUIServer:
             return await self.plugin.webui_user_insight_api()
 
     async def _is_port_in_use(self) -> bool:
-        host = str(self.settings.standalone_webui_host or "127.0.0.1")
+        host = self._resolve_probe_host()
         port = int(self.settings.standalone_webui_port)
-        check_host = host if host not in {"0.0.0.0", "::"} else "127.0.0.1"
         try:
             _reader, writer = await asyncio.wait_for(
-                asyncio.open_connection(check_host, port),
+                asyncio.open_connection(host, port),
                 timeout=0.5,
             )
         except Exception:
@@ -360,6 +386,62 @@ class StandaloneWebUIServer:
         writer.close()
         await writer.wait_closed()
         return True
+
+    async def _recover_occupied_port(self) -> bool:
+        sent = await self._request_internal_shutdown()
+        if not sent:
+            return False
+
+        wait_steps = int(
+            self._START_RECOVERY_TIMEOUT_SEC / self._START_RECOVERY_STEP_SEC
+        )
+        for _ in range(max(1, wait_steps)):
+            if not await self._is_port_in_use():
+                logger.info(
+                    "[oyasumi] standalone webui port recovered: %s:%s",
+                    self.settings.standalone_webui_host,
+                    self.settings.standalone_webui_port,
+                )
+                return True
+            await asyncio.sleep(self._START_RECOVERY_STEP_SEC)
+        return False
+
+    async def _request_internal_shutdown(self) -> bool:
+        token = str(self.settings.standalone_webui_token or "").strip()
+        if not token:
+            return False
+        host = self._resolve_probe_host()
+        port = int(self.settings.standalone_webui_port)
+
+        def _post_shutdown() -> bool:
+            conn = http.client.HTTPConnection(host, port, timeout=1.5)
+            try:
+                conn.request(
+                    "POST",
+                    self._INTERNAL_SHUTDOWN_PATH,
+                    body="",
+                    headers={self._INTERNAL_SHUTDOWN_HEADER: token},
+                )
+                resp = conn.getresponse()
+                resp.read()
+                return resp.status == 200
+            finally:
+                conn.close()
+
+        try:
+            return await asyncio.to_thread(_post_shutdown)
+        except Exception:
+            return False
+
+    async def _trigger_internal_shutdown(self) -> None:
+        await asyncio.sleep(0)
+        self._shutdown_event.set()
+
+    def _resolve_probe_host(self) -> str:
+        host = str(self.settings.standalone_webui_host or "127.0.0.1")
+        if host in {"0.0.0.0", "::"}:
+            return "127.0.0.1"
+        return host
 
     def _get_allowed_cors_origins(self) -> set[str]:
         host = str(self.settings.standalone_webui_host or "127.0.0.1")
