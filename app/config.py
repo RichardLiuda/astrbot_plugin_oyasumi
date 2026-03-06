@@ -27,6 +27,7 @@ class PluginSettings:
     duplicate_night_reply: str
     llm_enabled: bool
     llm_provider_id: str | None
+    llm_analysis_provider_id: str | None
     llm_fallback_to_static: bool
     llm_temperature: float
     llm_max_tokens: int
@@ -142,6 +143,9 @@ def load_plugin_settings(
     day_boundary_hour = max(0, min(day_boundary_hour, 12))
 
     llm_provider_id = _as_str(raw.get("llm_provider_id"), "").strip() or None
+    llm_analysis_provider_id = (
+        _as_str(raw.get("llm_analysis_provider_id"), "").strip() or None
+    )
     standalone_webui_host = (
         _as_str(raw.get("standalone_webui_host"), "127.0.0.1").strip() or "127.0.0.1"
     )
@@ -203,6 +207,7 @@ def load_plugin_settings(
         ),
         llm_enabled=_as_bool(raw.get("llm_enabled"), False),
         llm_provider_id=llm_provider_id,
+        llm_analysis_provider_id=llm_analysis_provider_id,
         llm_fallback_to_static=_as_bool(raw.get("llm_fallback_to_static"), True),
         llm_temperature=max(0.0, min(_as_float(raw.get("llm_temperature"), 0.4), 1.5)),
         llm_max_tokens=max(64, _as_int(raw.get("llm_max_tokens"), 300)),

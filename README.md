@@ -56,7 +56,8 @@ uv pip install -r data/plugins/astrbot_plugin_oyasumi/requirements.txt
 - `reply_mode`：`static / llm`
 - `llm_enabled`：是否启用早晚安事件的 LLM 回复
 - `llm_fallback_to_static`：事件 LLM 失败是否回退固定回复
-- `llm_provider_id`：可选，指定模型供应商
+- `llm_provider_id`：可选，指定早晚安回复使用的模型供应商
+- `llm_analysis_provider_id`：可选，指定统计分析和 WebUI 分析使用的模型供应商
 - `llm_temperature` / `llm_max_tokens` / `llm_timeout_sec`
 - `llm_prompt_morning` / `llm_prompt_night` / `llm_prompt_analysis`
 

@@ -2,6 +2,17 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [v0.1.3] - 2026-03-06
+
+### Added
+- 新增独立的分析模型配置项 `llm_analysis_provider_id`，可在配置页单独指定 WebUI 分析和 `/作息 分析` 使用的模型供应商。
+- 新增 WebUI 前端日志上报接口，关键请求和错误会同步输出到 AstrBot 终端，便于排查线上问题。
+
+### Fixed
+- 修复 WebUI 个性化分析请求路径错误：前端由错误的 `/api/analyze` 改为后端实际提供的 `/api/analysis`。
+- 修复 WebUI 分析结果字段读取错误：前端改为消费后端真实返回的 `analysis_text`。
+- 明确区分“回复模型”和“分析模型”的配置与解析逻辑，避免 WebUI 分析隐式落到不明确的 provider 上。
+
 ## [v0.1.2] - 2026-03-06
 
 ### Changed
@@ -76,4 +87,3 @@
 
 - 完成 README 定稿，文档与当前功能、接口和 WebUI 行为保持一致。
 - 新增 CHANGELOG，记录版本变化。
-

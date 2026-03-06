@@ -349,6 +349,39 @@ class StandaloneWebUIServer:
                 return Response(status=204)
             return await self.plugin.webui_analysis_api()
 
+        @self.app.route("/api/client-log", methods=["POST", "OPTIONS"])
+        async def api_client_log():
+            if request.method == "OPTIONS":
+                return Response(status=204)
+            payload = await request.get_json(silent=True) or {}
+            level = str(payload.get("level") or "info").strip().lower()
+            message = str(payload.get("message") or "").strip()
+            extra = payload.get("extra")
+
+            if not message:
+                return jsonify({"status": "error", "message": "message is required"}), 400
+
+            if len(message) > 500:
+                message = message[:500]
+
+            if isinstance(extra, dict):
+                safe_extra = {
+                    str(k)[:80]: str(v)[:300]
+                    for k, v in extra.items()
+                }
+            else:
+                safe_extra = {"value": str(extra)[:300]} if extra is not None else {}
+
+            log_message = "[oyasumi-webui] %s | extra=%s"
+            if level == "error":
+                logger.error(log_message, message, safe_extra)
+            elif level == "warning":
+                logger.warning(log_message, message, safe_extra)
+            else:
+                logger.info(log_message, message, safe_extra)
+
+            return jsonify({"status": "ok", "data": {"accepted": True}})
+
         @self.app.route("/api/snapshot", methods=["GET", "OPTIONS"])
         async def api_snapshot():
             if request.method == "OPTIONS":

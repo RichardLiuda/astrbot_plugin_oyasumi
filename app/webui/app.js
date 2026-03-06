@@ -299,10 +299,33 @@ async function api(path, method = "GET", body = null) {
   }
 
   if (!response.ok || payload?.status !== "ok") {
+    reportClientLog("error", "API request failed", {
+      path,
+      method,
+      status: response.status,
+      message: payload?.message || "",
+    });
     throw new Error(payload?.message || `HTTP ${response.status}`);
   }
 
   return payload.data || {};
+}
+
+function reportClientLog(level, message, extra = null) {
+  const payload = {
+    level,
+    message,
+    extra,
+  };
+
+  fetch("/api/client-log", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  }).catch(() => {
+    // Ignore logging failures to avoid affecting the UI flow.
+  });
 }
 
 async function checkAuth() {
@@ -545,12 +568,16 @@ async function refreshAll({ silent = false } = {}) {
   if (!silent) setBusy(true);
   try {
     const rangeParams = currentRangeParams();
+    reportClientLog("info", "Refreshing dashboard data", rangeParams);
     await Promise.all([loadOverview(rangeParams), loadLeaderboard(rangeParams), loadSnapshot()]);
     await loadSelectedUserData(rangeParams);
     renderAll();
     updateLastUpdated();
     if (!silent) notify("看板数据已同步");
   } catch (error) {
+    reportClientLog("error", "Failed to refresh dashboard data", {
+      message: error.message || String(error),
+    });
     notify(error.message || String(error), true);
   } finally {
     if (!silent) setBusy(false);
@@ -619,13 +646,22 @@ async function handleGenerateAnalysis() {
   els.analysisBtn.disabled = true;
   els.analysisState.textContent = "LLM 大模型深度分析中...";
   try {
-    const payload = await api("/api/analyze", "POST", options);
-    if (!payload.markdown) throw new Error("返回数据结构异常");
+    reportClientLog("info", "Generating analysis", {
+      user_id: state.selectedUserId || "",
+      start_date: options.start_date,
+      end_date: options.end_date,
+    });
+    const payload = await api("/api/analysis", "POST", options);
+    if (!payload.analysis_text) throw new Error("返回数据结构异常");
     els.analysisState.textContent = "分析已完成";
-    els.analysisMd.innerHTML = markdownToHtml(payload.markdown);
+    els.analysisMd.innerHTML = markdownToHtml(payload.analysis_text);
   } catch (error) {
     els.analysisState.textContent = "分析失败";
     els.analysisMd.innerHTML = `<p style="color:red;">异常：${escapeHtml(error.message || String(error))}</p>`;
+    reportClientLog("error", "Analysis generation failed", {
+      message: error.message || String(error),
+      user_id: state.selectedUserId || "",
+    });
     notify(error.message || "生成分析报告异常", true);
   } finally {
     els.analysisBtn.disabled = false;

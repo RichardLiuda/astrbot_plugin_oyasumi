@@ -102,7 +102,7 @@ class ResponseService:
         user_name: str,
         stats_text: str,
     ) -> tuple[str, bool, str]:
-        provider_id = self._resolve_provider_id(umo)
+        provider_id = self._resolve_analysis_provider_id(umo)
         if not provider_id:
             return ("未找到可用模型，无法生成分析。", False, "provider_not_found")
 
@@ -256,7 +256,7 @@ class ResponseService:
         user_name: str,
         result: EventProcessResult,
     ) -> str | None:
-        provider_id = self._resolve_provider_id(umo)
+        provider_id = self._resolve_reply_provider_id(umo)
         if not provider_id:
             return None
 
@@ -417,8 +417,20 @@ class ResponseService:
         )
         return text or None
 
-    def _resolve_provider_id(self, umo: str) -> str | None:
-        configured_provider_id = self.settings.llm_provider_id
+    def _resolve_reply_provider_id(self, umo: str) -> str | None:
+        return self._resolve_provider_id(umo, self.settings.llm_provider_id)
+
+    def _resolve_analysis_provider_id(self, umo: str) -> str | None:
+        return self._resolve_provider_id(
+            umo,
+            self.settings.llm_analysis_provider_id or self.settings.llm_provider_id,
+        )
+
+    def _resolve_provider_id(
+        self,
+        umo: str,
+        configured_provider_id: str | None,
+    ) -> str | None:
         if configured_provider_id:
             configured_provider = self.context.get_provider_by_id(
                 configured_provider_id

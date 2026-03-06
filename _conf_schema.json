@@ -61,8 +61,16 @@
   "llm_provider_id": {
     "_special": "select_provider",
     "type": "string",
-    "description": "大模型提供商 ID（可留空）",
-    "default": ""
+    "description": "早晚安回复模型提供商 ID（可留空）",
+    "default": "",
+    "hint": "用于早安/晚安事件回复。留空时跟随当前会话模型，取不到时回退到第一个可用 provider"
+  },
+  "llm_analysis_provider_id": {
+    "_special": "select_provider",
+    "type": "string",
+    "description": "分析模型提供商 ID（可留空）",
+    "default": "",
+    "hint": "用于 /作息 分析 和 WebUI 个性化分析。留空时优先回退到回复模型，再回退到当前会话模型"
   },
   "llm_fallback_to_static": {
     "type": "bool",
