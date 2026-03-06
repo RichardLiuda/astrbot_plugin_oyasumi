@@ -44,7 +44,7 @@ class OyasumiPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig | dict | None = None):
         super().__init__(context)
         self.context = context
-        self.config = dict(config or {})
+        self.config = config if config is not None else {}
 
         plugin_data_dir = _resolve_plugin_data_dir(PLUGIN_NAME)
         sql_path = Path(__file__).parent / "app" / "sql" / "init.sql"
@@ -72,13 +72,26 @@ class OyasumiPlugin(Star):
         await self.repository.initialize()
         self._register_web_apis()
         if self.settings.standalone_webui_enabled:
-            self.standalone_webui_server = StandaloneWebUIServer(self)
-            await self.standalone_webui_server.start()
-            logger.info(
-                "[oyasumi] standalone webui started at http://%s:%s",
-                self.settings.standalone_webui_host,
-                self.settings.standalone_webui_port,
-            )
+            if not self.settings.standalone_webui_token:
+                logger.warning(
+                    "[oyasumi] standalone webui is enabled but standalone_webui_token is empty; "
+                    "set a token before enabling webui"
+                )
+            else:
+                self.standalone_webui_server = StandaloneWebUIServer(self)
+                try:
+                    await self.standalone_webui_server.start()
+                    logger.info(
+                        "[oyasumi] standalone webui started at http://%s:%s",
+                        self.settings.standalone_webui_host,
+                        self.settings.standalone_webui_port,
+                    )
+                except Exception as exc:
+                    logger.error(
+                        "[oyasumi] standalone webui failed to start, plugin will continue without webui: %s",
+                        exc,
+                    )
+                    self.standalone_webui_server = None
         logger.info(
             "[oyasumi] initialized, db=%s, enabled=%s",
             self.settings.db_path,

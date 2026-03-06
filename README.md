@@ -69,10 +69,10 @@ uv pip install -r data/plugins/astrbot_plugin_oyasumi/requirements.txt
 
 ### 独立 WebUI
 
-- `standalone_webui_enabled`：是否启用独立 WebUI
+- `standalone_webui_enabled`：是否启用独立 WebUI，默认关闭；若登录令牌为空，保存后会自动恢复为关闭
 - `standalone_webui_host`：监听地址（局域网可用 `0.0.0.0`）
 - `standalone_webui_port`：监听端口（默认 `6196`）
-- `standalone_webui_token`：登录口令（建议设置强随机值）
+- `standalone_webui_token`：登录口令；启用独立 WebUI 时必须设置，建议使用强随机值
 
 ## 命令
 
@@ -170,6 +170,7 @@ uv pip install -r data/plugins/astrbot_plugin_oyasumi/requirements.txt
   - 检查模型供应商是否可用
 - WebUI 无法访问：
   - 检查 `standalone_webui_enabled`、`host`、`port`
+  - 若已开启独立 WebUI，确认 `standalone_webui_token` 已设置
   - 检查服务器防火墙与端口放行
 - 登录后仍被踢回登录页：
   - 检查 token 是否一致

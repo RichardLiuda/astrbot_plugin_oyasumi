@@ -103,7 +103,7 @@ def load_plugin_settings(
     plugin_data_dir: Path,
     sql_init_path: Path,
 ) -> PluginSettings:
-    raw = raw_config or {}
+    raw = raw_config if raw_config is not None else {}
     plugin_data_dir = Path(plugin_data_dir)
     plugin_data_dir.mkdir(parents=True, exist_ok=True)
 
@@ -149,6 +149,28 @@ def load_plugin_settings(
         1,
         min(_as_int(raw.get("standalone_webui_port"), 6196), 65535),
     )
+    standalone_webui_token = _as_str(raw.get("standalone_webui_token"), "").strip()
+    standalone_webui_enabled = _as_bool(
+        raw.get("standalone_webui_enabled"),
+        False,
+    )
+    if standalone_webui_enabled and not standalone_webui_token:
+        standalone_webui_enabled = False
+        raw["standalone_webui_enabled"] = False
+        logger.warning(
+            "[%s] standalone_webui_enabled was reset to false because standalone_webui_token is empty",
+            plugin_name,
+        )
+        save_config = getattr(raw, "save_config", None)
+        if callable(save_config):
+            try:
+                save_config()
+            except Exception as exc:
+                logger.warning(
+                    "[%s] failed to persist standalone_webui_enabled=false: %s",
+                    plugin_name,
+                    exc,
+                )
 
     return PluginSettings(
         enabled=_as_bool(raw.get("enabled"), True),
@@ -207,13 +229,10 @@ def load_plugin_settings(
         include_auto_fill_in_stats=_as_bool(
             raw.get("include_auto_fill_in_stats"), True
         ),
-        standalone_webui_enabled=_as_bool(
-            raw.get("standalone_webui_enabled"),
-            True,
-        ),
+        standalone_webui_enabled=standalone_webui_enabled,
         standalone_webui_host=standalone_webui_host,
         standalone_webui_port=standalone_webui_port,
-        standalone_webui_token=_as_str(raw.get("standalone_webui_token"), "").strip(),
+        standalone_webui_token=standalone_webui_token,
         plugin_data_dir=plugin_data_dir,
         db_path=plugin_data_dir / "oyasumi.db",
         sql_init_path=Path(sql_init_path),

@@ -142,24 +142,26 @@
   },
   "standalone_webui_enabled": {
     "type": "bool",
-    "description": "是否启用独立 WebUI（独立端口）",
-    "default": true
+    "description": "是否启用独立 WebUI 面板（独立端口）",
+    "default": false,
+    "hint": "默认关闭。只有在已设置登录令牌时才建议开启；若令牌为空，保存后会自动回退为关闭"
   },
   "standalone_webui_host": {
     "type": "string",
     "description": "独立 WebUI 监听地址",
     "default": "127.0.0.1",
-    "hint": "如需局域网访问可设置为 0.0.0.0"
+    "hint": "本机访问可保持 127.0.0.1；需要局域网访问时可改为 0.0.0.0，并自行做好访问控制"
   },
   "standalone_webui_port": {
     "type": "int",
     "description": "独立 WebUI 监听端口",
-    "default": 6196
+    "default": 6196,
+    "hint": "默认使用 6196；如果端口被其他程序占用，请改为未被占用的端口"
   },
   "standalone_webui_token": {
     "type": "string",
-    "description": "独立 WebUI 登录令牌（建议设置）",
+    "description": "独立 WebUI 登录令牌",
     "default": "",
-    "hint": "WebUI 始终需要登录；此项为空时可空口令登录，建议设置高强度随机字符串"
+    "hint": "启用独立 WebUI 时必须填写。建议使用高强度随机字符串；若为空，WebUI 开关会在保存后自动关闭"
   }
 }
