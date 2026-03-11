@@ -27,14 +27,6 @@
   - 登录页 + 会话 Cookie 鉴权。
   - 群聊总览、趋势热力图、Top10 活跃榜、用户下钻、会话筛选。
 
-## 安装
-
-在 AstrBot 根目录执行：
-
-```bash
-uv pip install -r data/plugins/astrbot_plugin_oyasumi/requirements.txt
-```
-
 ## 核心配置项
 
 配置 Schema：`_conf_schema.json`
@@ -97,52 +89,9 @@ uv pip install -r data/plugins/astrbot_plugin_oyasumi/requirements.txt
 
 - `http://127.0.0.1:6196/`
 
-鉴权行为：
-
-- 未登录访问根路径会跳转 `/login`。
-- 登录成功后由服务端下发 HttpOnly 会话 Cookie。
-- 会话失效后接口返回 `401`，前端自动跳转登录页。
-
-当前看板结构（现状）：
-
-- 左侧固定导航（移动端为抽屉）
-- 群聊总览 KPI
-- 趋势图谱（入睡热力图 / 起床热力图 / 群聊趋势）
-- Top10 活跃榜 + 用户下钻
-- 用户详情与会话明细筛选
-- LLM 分析与 Snapshot 折叠区
-
 刷新策略：
 
 - 15 秒自动轮询 + 手动刷新
-
-## Web API（现状）
-
-以下接口同时支持：
-
-- AstrBot 注册路由：`/oyasumi/*`
-- 独立 WebUI 路由：`/api/*`
-
-### 兼容接口
-
-- `GET /users`
-- `GET /dashboard`
-- `GET /sessions`
-- `GET /summary`
-- `POST /analysis`
-- `GET /snapshot`
-
-### 群聊看板接口
-
-- `GET /overview`
-  - 参数：`days` 或 `start_date/end_date`
-  - 返回：`kpis`、`daily_series`、`sleep_heatmap`、`wake_heatmap`
-- `GET /leaderboard`
-  - 参数：`days` 或 `start_date/end_date`、`limit`、`metric(activity)`
-  - 返回：活跃榜明细（Top N）
-- `GET /user_insight`
-  - 参数：`user_id` + 时间范围
-  - 返回：用户 KPI、日趋势、时段分布、最近会话
 
 ## 事件归属逻辑
 
@@ -176,12 +125,6 @@ uv pip install -r data/plugins/astrbot_plugin_oyasumi/requirements.txt
 - 登录后仍被踢回登录页：
   - 检查 token 是否一致
   - 检查反向代理是否保留 Cookie
-
-## 文档
-
-- 需求文档：`REQUIREMENTS.md`
-- 设计文档：`DESIGN.md`
-- 更新日志：`CHANGELOG.md`
 
 ## 参考
 
