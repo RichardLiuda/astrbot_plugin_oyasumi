@@ -1,4 +1,4 @@
-﻿const $ = (id) => document.getElementById(id);
+const $ = (id) => document.getElementById(id);
 
 const els = {
   form: $("login_form"),
@@ -20,12 +20,12 @@ function setMessage(text, error = false) {
 
 function setLoading(loading) {
   els.button.disabled = loading;
-  if(loading) {
-      els.button.classList.add("is-loading");
-      els.button.querySelector("span:last-child").textContent = "验证中...";
+  if (loading) {
+    els.button.classList.add("is-loading");
+    els.button.querySelector("span:last-child").textContent = "验证中...";
   } else {
-      els.button.classList.remove("is-loading");
-      els.button.querySelector("span:last-child").textContent = "验证身份";
+    els.button.classList.remove("is-loading");
+    els.button.querySelector("span:last-child").textContent = "验证身份";
   }
 }
 
@@ -69,27 +69,23 @@ async function submitLogin(event) {
   try {
     await requestJson("/api/auth/login", "POST", { token });
     setMessage("登录成功，正在跳转...", false);
-    // Smooth transition emulation
-    document.body.style.opacity = '0';
-    document.body.style.transition = 'opacity 0.4s ease';
+    document.body.classList.remove("is-ready");
+    document.body.classList.add("is-leaving");
     setTimeout(() => {
-        window.location.href = "/";
+      window.location.href = "/";
     }, 400);
   } catch (error) {
     setMessage(error.message || "口令无效，登录失败", true);
-    // Add shake animation class
-    els.form.classList.add('shake');
-    setTimeout(() => els.form.classList.remove('shake'), 400);
+    els.form.classList.add("shake");
+    setTimeout(() => els.form.classList.remove("shake"), 400);
   } finally {
     setLoading(false);
   }
 }
 
 async function bootstrap() {
-  document.body.style.opacity = '0';
   setTimeout(() => {
-      document.body.style.transition = 'opacity 0.6s cubic-bezier(0.2, 0, 0, 1)';
-      document.body.style.opacity = '1';
+    document.body.classList.add("is-ready");
   }, 50);
 
   try {

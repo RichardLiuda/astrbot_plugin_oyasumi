@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
@@ -13,7 +13,6 @@
   <link rel="stylesheet" href="/static/styles.css" />
 </head>
 <body class="login-body">
-  <!-- 动态流体渐变背景 -->
   <div class="mesh-bg" aria-hidden="true">
     <div class="mesh-orb orb-1"></div>
     <div class="mesh-orb orb-2"></div>
@@ -22,39 +21,78 @@
   </div>
 
   <main class="login-container">
-    <section class="md3-elevated-card login-card-premium">
-      <div class="login-header">
-        <div class="brand-badge">
-          <span class="material-symbols-rounded">nights_stay</span>
+    <div class="login-stage">
+      <section class="login-showcase">
+        <div class="brand-mark">
+          <div class="brand-badge">
+            <span class="material-symbols-rounded">nights_stay</span>
+          </div>
+          <div class="brand-copy">
+            <span class="brand-title">Oyasumi</span>
+            <span class="brand-subtitle">群聊作息看板</span>
+          </div>
         </div>
-        <p class="md3-overline">Oyasumi Access</p>
-        <h1 class="md3-headline">欢迎回来</h1>
-        <p class="md3-body-medium login-tip">
-          请输入您的配置项 <code>standalone_webui_token</code> 以访问群聊作息看板。
-        </p>
-      </div>
 
-      <form id="login_form" class="login-form-premium">
-        <div class="md3-text-field">
-          <input
-            id="login_token"
-            type="password"
-            autocomplete="current-password"
-            placeholder=" "
-            required
-          />
-          <label for="login_token">访问口令</label>
+        <div class="login-header">
+          <p class="md3-overline">Welcome Back</p>
+          <h1 class="md3-headline">登录后可查看总览、趋势、排行、个体明细与 LLM 分析。</h1>
+          <p class="md3-body-medium login-tip">
+            访问口令来自配置项
+            <code>standalone_webui_token</code>。
+          </p>
         </div>
-        <button id="login_btn" class="md3-fab-extended primary" type="submit">
-          <span class="material-symbols-rounded">arrow_forward</span>
-          <span>验证身份</span>
-        </button>
-      </form>
 
-      <div id="login_message_container" class="login-message-wrapper">
-        <p id="login_message" class="md3-body-small"></p>
-      </div>
-    </section>
+        <div class="login-showcase-grid">
+          <div class="login-showcase-card">
+            <div class="section-eyebrow">Overview</div>
+            <p class="md3-body-small text-variant">群体指标、范围控制和自动刷新状态集中展示。</p>
+          </div>
+          <div class="login-showcase-card">
+            <div class="section-eyebrow">Insights</div>
+            <p class="md3-body-small text-variant">从排行榜直接下钻成员，查看个人规律与会话明细。</p>
+          </div>
+          <div class="login-showcase-card">
+            <div class="section-eyebrow">Analysis</div>
+            <p class="md3-body-small text-variant">支持全体成员综合分析，也支持当前用户个体分析。</p>
+          </div>
+          <div class="login-showcase-card">
+            <div class="section-eyebrow">Snapshot</div>
+            <p class="md3-body-small text-variant">可查看原始快照数据，便于核对当前看板状态。</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="md3-elevated-card login-card-premium">
+        <div class="login-header">
+          <p class="md3-overline">Secure Access</p>
+          <h2 class="md3-title-large">登录 WebUI</h2>
+          <p class="md3-body-medium login-tip">
+            输入访问口令后即可进入作息看板。
+          </p>
+        </div>
+
+        <form id="login_form" class="login-form-premium">
+          <div class="md3-text-field">
+            <input
+              id="login_token"
+              type="password"
+              autocomplete="current-password"
+              placeholder=" "
+              required
+            />
+            <label for="login_token">访问口令</label>
+          </div>
+          <button id="login_btn" class="md3-fab-extended primary" type="submit">
+            <span class="material-symbols-rounded">arrow_forward</span>
+            <span>验证身份</span>
+          </button>
+        </form>
+
+        <div id="login_message_container" class="login-message-wrapper">
+          <p id="login_message" class="md3-body-small"></p>
+        </div>
+      </section>
+    </div>
   </main>
 
   <script src="/static/login.js"></script>

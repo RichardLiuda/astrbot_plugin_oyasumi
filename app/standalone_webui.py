@@ -20,6 +20,11 @@ class StandaloneWebUIServer:
     _ACTIVE_SERVERS: WeakValueDictionary[str, StandaloneWebUIServer] = (
         WeakValueDictionary()
     )
+    _STATE_IDLE = "idle"
+    _STATE_STARTING = "starting"
+    _STATE_RUNNING = "running"
+    _STATE_STOPPING = "stopping"
+    _STATE_FAILED = "failed"
     _SESSION_COOKIE_NAME = "oyasumi_webui_session"
     _SESSION_TTL = timedelta(hours=12)
     _LOGIN_WINDOW = timedelta(minutes=10)
@@ -27,8 +32,12 @@ class StandaloneWebUIServer:
     _LOGIN_MAX_ATTEMPTS = 8
     _START_RECOVERY_TIMEOUT_SEC = 10.0
     _START_RECOVERY_STEP_SEC = 0.25
+    _START_HEALTH_TIMEOUT_SEC = 5.0
+    _START_HEALTH_STEP_SEC = 0.1
     _STOP_WAIT_TIMEOUT_SEC = 5.0
     _STOP_WAIT_STEP_SEC = 0.2
+    _RECOVERY_REQUEST_ATTEMPTS = 3
+    _RECOVERY_REQUEST_STEP_SEC = 0.5
     _INTERNAL_SHUTDOWN_PATH = "/__oyasumi_internal/shutdown"
     _INTERNAL_SHUTDOWN_HEADER = "X-Oyasumi-Shutdown-Token"
 
@@ -46,78 +55,97 @@ class StandaloneWebUIServer:
         )
         self._shutdown_event = asyncio.Event()
         self._serve_task: asyncio.Task | None = None
+        self._lifecycle_lock = asyncio.Lock()
+        self._state = self._STATE_IDLE
         self._register_routes()
 
     async def start(self) -> None:
-        if self._serve_task and not self._serve_task.done():
-            return
-        if not str(self.settings.standalone_webui_token or "").strip():
-            raise RuntimeError(
-                "standalone_webui_token must be configured and non-empty"
-            )
+        async with self._lifecycle_lock:
+            await self._finalize_completed_task_locked()
+            if (
+                self._state in {self._STATE_STARTING, self._STATE_RUNNING}
+                and self._serve_task is not None
+                and not self._serve_task.done()
+            ):
+                return
 
-        await self._stop_local_stale_server()
-        if await self._is_port_in_use():
-            logger.warning(
-                "[oyasumi] standalone webui port is occupied, trying graceful recovery: %s:%s",
+            self._ensure_token_configured()
+            self._state = self._STATE_STARTING
+            self._shutdown_event = asyncio.Event()
+            self._serve_task = None
+            try:
+                await self._stop_local_stale_server()
+                if await self._is_port_in_use():
+                    logger.warning(
+                        "[oyasumi] standalone webui port is occupied, trying graceful recovery: %s:%s",
+                        self.settings.standalone_webui_host,
+                        self.settings.standalone_webui_port,
+                    )
+                    recovered = await self._recover_occupied_port()
+                    if not recovered:
+                        raise RuntimeError(
+                            "standalone webui port already in use: "
+                            f"{self.settings.standalone_webui_host}:{self.settings.standalone_webui_port}"
+                        )
+
+                serve_task = asyncio.create_task(
+                    serve(
+                        self.app,
+                        self._build_hypercorn_config(),
+                        shutdown_trigger=self._shutdown_trigger,
+                    ),
+                    name="oyasumi-standalone-webui",
+                )
+                self._serve_task = serve_task
+                self._register_active_server()
+                serve_task.add_done_callback(self._on_serve_task_done)
+                await self._wait_for_server_ready(serve_task)
+            except BaseException:
+                await self._cleanup_after_start_failure_locked()
+                raise
+
+            self._state = self._STATE_RUNNING
+
+    async def stop(self) -> None:
+        cancel_requested = False
+        async with self._lifecycle_lock:
+            await self._finalize_completed_task_locked()
+            serve_task = self._serve_task
+            if serve_task is None:
+                self._state = self._STATE_IDLE
+                self._unregister_active_server()
+                return
+
+            logger.info(
+                "[oyasumi] standalone webui stop requested: %s:%s",
                 self.settings.standalone_webui_host,
                 self.settings.standalone_webui_port,
             )
-            recovered = await self._recover_occupied_port()
-            if not recovered:
-                raise RuntimeError(
-                    "standalone webui port already in use: "
-                    f"{self.settings.standalone_webui_host}:{self.settings.standalone_webui_port}"
+            self._state = self._STATE_STOPPING
+            self._shutdown_event.set()
+            try:
+                await asyncio.wait_for(asyncio.shield(serve_task), timeout=8)
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "[oyasumi] standalone webui stop timeout, force cancel task"
                 )
-
-        config = HyperConfig()
-        config.bind = [
-            f"{self.settings.standalone_webui_host}:{self.settings.standalone_webui_port}"
-        ]
-        config.accesslog = None
-
-        self._shutdown_event = asyncio.Event()
-        self._serve_task = asyncio.create_task(
-            serve(self.app, config, shutdown_trigger=self._shutdown_trigger)
-        )
-        self._register_active_server()
-        self._serve_task.add_done_callback(self._on_serve_task_done)
-        await asyncio.sleep(0)
-        if self._serve_task.done():
-            exc = self._serve_task.exception()
-            if exc is not None:
+                await self._cancel_serve_task(serve_task)
+            except asyncio.CancelledError:
+                cancel_requested = True
+                logger.warning(
+                    "[oyasumi] standalone webui stop was cancelled, forcing cleanup to finish"
+                )
+                await self._cancel_serve_task(serve_task)
+            except Exception as exc:
+                logger.warning("[oyasumi] standalone webui stop failed: %s", exc)
+            finally:
                 self._serve_task = None
                 self._unregister_active_server()
-                raise exc
+                self._state = self._STATE_IDLE
 
-    async def stop(self) -> None:
-        if not self._serve_task:
-            self._unregister_active_server()
-            return
+            port_released = await self._wait_for_port_released()
 
-        logger.info(
-            "[oyasumi] standalone webui stop requested: %s:%s",
-            self.settings.standalone_webui_host,
-            self.settings.standalone_webui_port,
-        )
-        self._shutdown_event.set()
-        try:
-            await asyncio.wait_for(self._serve_task, timeout=8)
-        except asyncio.TimeoutError:
-            logger.warning("[oyasumi] standalone webui stop timeout, force cancel task")
-            if not self._serve_task.done():
-                self._serve_task.cancel()
-                try:
-                    await self._serve_task
-                except BaseException:
-                    pass
-        except Exception as exc:
-            logger.warning("[oyasumi] standalone webui stop failed: %s", exc)
-        finally:
-            self._serve_task = None
-            self._unregister_active_server()
-
-        if await self._wait_for_port_released():
+        if port_released:
             logger.info(
                 "[oyasumi] standalone webui stopped and port released: %s:%s",
                 self.settings.standalone_webui_host,
@@ -129,9 +157,88 @@ class StandaloneWebUIServer:
                 self.settings.standalone_webui_host,
                 self.settings.standalone_webui_port,
             )
+        if cancel_requested:
+            raise asyncio.CancelledError
 
     async def _shutdown_trigger(self) -> None:
         await self._shutdown_event.wait()
+
+    def _ensure_token_configured(self) -> None:
+        if not str(self.settings.standalone_webui_token or "").strip():
+            raise RuntimeError(
+                "standalone_webui_token must be configured and non-empty"
+            )
+
+    def _build_hypercorn_config(self) -> HyperConfig:
+        config = HyperConfig()
+        config.bind = [
+            f"{self.settings.standalone_webui_host}:{self.settings.standalone_webui_port}"
+        ]
+        config.accesslog = None
+        return config
+
+    async def _wait_for_server_ready(self, serve_task: asyncio.Task) -> None:
+        wait_steps = max(
+            1,
+            int(self._START_HEALTH_TIMEOUT_SEC / self._START_HEALTH_STEP_SEC),
+        )
+        for _ in range(wait_steps):
+            if serve_task.done():
+                raise self._serve_task_error(serve_task)
+            if await self._probe_healthz():
+                return
+            await asyncio.sleep(self._START_HEALTH_STEP_SEC)
+        if serve_task.done():
+            raise self._serve_task_error(serve_task)
+        raise RuntimeError("standalone webui did not become healthy before timeout")
+
+    async def _cleanup_after_start_failure_locked(self) -> None:
+        serve_task = self._serve_task
+        self._shutdown_event.set()
+        if serve_task is not None:
+            await self._cancel_serve_task(serve_task)
+        self._serve_task = None
+        self._unregister_active_server()
+        self._state = self._STATE_IDLE
+
+    async def _cancel_serve_task(self, serve_task: asyncio.Task | None) -> None:
+        if serve_task is None:
+            return
+        if not serve_task.done():
+            serve_task.cancel()
+        try:
+            await asyncio.shield(serve_task)
+        except BaseException:
+            pass
+
+    async def _finalize_completed_task_locked(self) -> None:
+        serve_task = self._serve_task
+        if serve_task is None or not serve_task.done():
+            return
+        try:
+            await asyncio.shield(serve_task)
+        except BaseException:
+            pass
+        finally:
+            if self._serve_task is serve_task:
+                self._serve_task = None
+            self._unregister_active_server()
+            if self._state != self._STATE_STOPPING:
+                self._state = self._STATE_IDLE
+
+    def _serve_task_error(
+        self, serve_task: asyncio.Task
+    ) -> RuntimeError | BaseException:
+        if serve_task.cancelled():
+            return RuntimeError(
+                "standalone webui serve task was cancelled during startup"
+            )
+        exc = serve_task.exception()
+        if exc is not None:
+            return exc
+        return RuntimeError(
+            "standalone webui serve task exited before startup completed"
+        )
 
     def _utcnow(self) -> datetime:
         return datetime.now(timezone.utc)
@@ -450,14 +557,8 @@ class StandaloneWebUIServer:
         return True
 
     async def _recover_occupied_port(self) -> bool:
-        wait_steps = max(
-            1,
-            int(self._START_RECOVERY_TIMEOUT_SEC / self._START_RECOVERY_STEP_SEC),
-        )
         shutdown_requested = False
-        for _ in range(wait_steps):
-            if await self._request_internal_shutdown():
-                shutdown_requested = True
+        for attempt in range(self._RECOVERY_REQUEST_ATTEMPTS):
             if not await self._is_port_in_use():
                 logger.info(
                     "[oyasumi] standalone webui port recovered: %s:%s",
@@ -465,7 +566,33 @@ class StandaloneWebUIServer:
                     self.settings.standalone_webui_port,
                 )
                 return True
-            await asyncio.sleep(self._START_RECOVERY_STEP_SEC)
+
+            accepted = await self._request_internal_shutdown()
+            shutdown_requested = shutdown_requested or accepted
+            if accepted:
+                break
+            if attempt + 1 < self._RECOVERY_REQUEST_ATTEMPTS:
+                await asyncio.sleep(self._RECOVERY_REQUEST_STEP_SEC)
+
+        if shutdown_requested and await self._wait_for_port_released(
+            timeout_sec=self._START_RECOVERY_TIMEOUT_SEC,
+            step_sec=self._START_RECOVERY_STEP_SEC,
+        ):
+            logger.info(
+                "[oyasumi] standalone webui port recovered: %s:%s",
+                self.settings.standalone_webui_host,
+                self.settings.standalone_webui_port,
+            )
+            return True
+
+        if not await self._is_port_in_use():
+            logger.info(
+                "[oyasumi] standalone webui port recovered: %s:%s",
+                self.settings.standalone_webui_host,
+                self.settings.standalone_webui_port,
+            )
+            return True
+
         if shutdown_requested:
             logger.warning(
                 "[oyasumi] standalone webui shutdown was requested but the port is still busy after %.1fs: %s:%s",
@@ -504,7 +631,14 @@ class StandaloneWebUIServer:
                 conn.close()
 
         try:
-            return await asyncio.to_thread(_post_shutdown)
+            return await asyncio.shield(asyncio.to_thread(_post_shutdown))
+        except asyncio.CancelledError:
+            logger.warning(
+                "[oyasumi] internal shutdown request was cancelled while waiting for recovery: %s:%s",
+                self.settings.standalone_webui_host,
+                self.settings.standalone_webui_port,
+            )
+            return False
         except Exception:
             return False
 
@@ -529,6 +663,22 @@ class StandaloneWebUIServer:
 
     def _on_serve_task_done(self, task: asyncio.Task | None) -> None:
         self._unregister_active_server()
+        if task is None or self._serve_task is not task:
+            return
+        if task.cancelled():
+            if self._state != self._STATE_STOPPING:
+                self._state = self._STATE_IDLE
+            return
+        exc = task.exception()
+        if exc is not None:
+            if self._state != self._STATE_STOPPING:
+                self._state = self._STATE_FAILED
+            logger.warning(
+                "[oyasumi] standalone webui serve task exited with error: %s", exc
+            )
+            return
+        if self._state != self._STATE_STOPPING:
+            self._state = self._STATE_IDLE
 
     async def _stop_local_stale_server(self) -> None:
         bind_key = self._bind_key()
@@ -551,16 +701,46 @@ class StandaloneWebUIServer:
                 exc,
             )
 
-    async def _wait_for_port_released(self) -> bool:
+    async def _wait_for_port_released(
+        self,
+        *,
+        timeout_sec: float | None = None,
+        step_sec: float | None = None,
+    ) -> bool:
+        timeout = (
+            self._STOP_WAIT_TIMEOUT_SEC
+            if timeout_sec is None
+            else max(0.1, timeout_sec)
+        )
+        step = self._STOP_WAIT_STEP_SEC if step_sec is None else max(0.05, step_sec)
         wait_steps = max(
             1,
-            int(self._STOP_WAIT_TIMEOUT_SEC / self._STOP_WAIT_STEP_SEC),
+            int(timeout / step),
         )
         for _ in range(wait_steps):
             if not await self._is_port_in_use():
                 return True
-            await asyncio.sleep(self._STOP_WAIT_STEP_SEC)
+            await asyncio.sleep(step)
         return not await self._is_port_in_use()
+
+    async def _probe_healthz(self) -> bool:
+        host = self._resolve_probe_host()
+        port = int(self.settings.standalone_webui_port)
+
+        def _get_healthz() -> bool:
+            conn = http.client.HTTPConnection(host, port, timeout=1.0)
+            try:
+                conn.request("GET", "/healthz")
+                resp = conn.getresponse()
+                resp.read()
+                return resp.status == 200
+            finally:
+                conn.close()
+
+        try:
+            return await asyncio.shield(asyncio.to_thread(_get_healthz))
+        except Exception:
+            return False
 
     def _resolve_probe_host(self) -> str:
         host = str(self.settings.standalone_webui_host or "127.0.0.1")

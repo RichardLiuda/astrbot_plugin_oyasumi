@@ -90,12 +90,13 @@ function isMobileLayout() {
 function setBusy(busy) {
   state.busy = busy;
   document.body.classList.toggle("is-busy", busy);
+  document.body.setAttribute("aria-busy", busy ? "true" : "false");
   els.refreshBtn.disabled = busy;
   els.analysisBtn.disabled = busy;
   if (busy) {
-    els.refreshBtn.classList.add('rotating');
+    els.refreshBtn.classList.add("rotating");
   } else {
-    els.refreshBtn.classList.remove('rotating');
+    els.refreshBtn.classList.remove("rotating");
   }
   setStatus(busy ? "同步中" : "就绪");
 }
@@ -269,12 +270,14 @@ function setActiveSection(
 function openSidebarDrawer() {
   if (!isMobileLayout()) return;
   state.drawerOpen = true;
+  if (els.drawerBackdrop) els.drawerBackdrop.hidden = false;
   document.body.classList.add("drawer-open");
 }
 
 function closeSidebarDrawer() {
   state.drawerOpen = false;
   document.body.classList.remove("drawer-open");
+  if (els.drawerBackdrop) els.drawerBackdrop.hidden = true;
 }
 
 function syncSectionByScroll() {
@@ -387,16 +390,16 @@ function renderKpis() {
   }
 
   const cards = [
-    { label: "活跃人数", value: String(kpis.active_user_count || 0), sub: "发生闭合会话" },
-    { label: "打卡次数", value: String(kpis.total_sessions || 0), sub: "有效睡眠记录" },
-    { label: "人均睡眠", value: formatMinutes(kpis.avg_sleep_minutes || 0), sub: "平均时长" },
-    { label: "进行中会话", value: String(kpis.open_session_count || 0), sub: "挂机状态" },
-    { label: "孤立早安", value: String(kpis.orphan_morning_count || 0), sub: "未补录晚安" },
-    { label: "补录率", value: formatPercent(kpis.auto_fill_ratio || 0), sub: `系统自动纠错` },
+    { tone: "primary", label: "活跃人数", value: String(kpis.active_user_count || 0), sub: "发生闭合会话" },
+    { tone: "accent", label: "打卡次数", value: String(kpis.total_sessions || 0), sub: "有效睡眠记录" },
+    { tone: "secondary", label: "人均睡眠", value: formatMinutes(kpis.avg_sleep_minutes || 0), sub: "平均时长" },
+    { tone: "warning", label: "进行中会话", value: String(kpis.open_session_count || 0), sub: "待闭合状态" },
+    { tone: "accent", label: "孤立早安", value: String(kpis.orphan_morning_count || 0), sub: "未补录晚安" },
+    { tone: "secondary", label: "补录率", value: formatPercent(kpis.auto_fill_ratio || 0), sub: "系统自动纠错" },
   ];
 
   els.kpiGrid.innerHTML = cards.map((card) => `
-      <article class="kpi-card">
+      <article class="kpi-card kpi-tone-${escapeHtml(card.tone)}">
         <div class="kpi-label">${escapeHtml(card.label)}</div>
         <div class="kpi-value">${escapeHtml(card.value)}</div>
         <div class="kpi-sub">${escapeHtml(card.sub)}</div>
@@ -448,7 +451,10 @@ function renderLeaderboard() {
     return `
         <button class="leader-row ${selectedClass}" type="button" data-user-id="${escapeHtml(userIdEncoded)}">
           <span class="rank">#${index + 1}</span>
-          <span class="user">${escapeHtml(maskUserId(userId))}</span>
+          <span class="user">
+            ${escapeHtml(maskUserId(userId))}
+            <span class="nav-dest-desc">活跃度 ${escapeHtml(String(item.activity_count || 0))}</span>
+          </span>
           <span class="meta">${escapeHtml(formatMinutes(item.total_sleep_minutes || 0))}</span>
         </button>
       `;
@@ -525,20 +531,20 @@ function filterSessions(rows) {
 
 function renderSessions() {
   if (!state.selectedUserId) {
-    els.userSessionsTbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#74777f">请在上方选择用户</td></tr>';
+    els.userSessionsTbody.innerHTML = '<tr class="row-empty"><td colspan="7">请在上方选择用户</td></tr>';
     return;
   }
 
   const rows = filterSessions(state.sessions);
   if (!rows.length) {
-    els.userSessionsTbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#74777f">暂无匹配记录</td></tr>';
+    els.userSessionsTbody.innerHTML = '<tr class="row-empty"><td colspan="7">暂无匹配记录</td></tr>';
     return;
   }
 
   els.userSessionsTbody.innerHTML = rows.map((session) => `
       <tr>
-        <td style="color:#74777f;font-family:monospace;font-size:12px;">${escapeHtml(session.id)}</td>
-        <td style="font-weight:600;">${escapeHtml(maskUserId(session.user_id))}</td>
+        <td class="mono-cell">${escapeHtml(session.id)}</td>
+        <td class="cell-strong">${escapeHtml(maskUserId(session.user_id))}</td>
         <td><span class="md3-badge ${session.status === 'open' ? 'error' : 'neutral'}">${escapeHtml(session.status || "-")}</span></td>
         <td>${escapeHtml(formatDatetime(session.sleep_time))}</td>
         <td>${escapeHtml(formatDatetime(session.wake_time))}</td>
@@ -698,7 +704,7 @@ async function handleGenerateAnalysis() {
     els.analysisMd.innerHTML = markdownToHtml(payload.analysis_text);
   } catch (error) {
     els.analysisState.textContent = "分析失败";
-    els.analysisMd.innerHTML = `<p style="color:red;">异常：${escapeHtml(error.message || String(error))}</p>`;
+    els.analysisMd.innerHTML = `<p class="md3-inline-error">异常：${escapeHtml(error.message || String(error))}</p>`;
     reportClientLog("error", "Analysis generation failed", {
       message: error.message || String(error),
       scope,
@@ -711,13 +717,17 @@ async function handleGenerateAnalysis() {
 }
 
 function handleResize() {
+  if (!isMobileLayout()) {
+    closeSidebarDrawer();
+  }
   Object.values(charts).forEach((c) => { if (c) c.resize(); });
 }
 
 function setupEvents() {
   els.rangeChips?.addEventListener("click", (e) => {
-    if (e.target.dataset.range) {
-      setRangeMode(e.target.dataset.range);
+    const target = e.target.closest("[data-range]");
+    if (target?.dataset.range) {
+      setRangeMode(target.dataset.range);
       refreshAll();
     }
   });
@@ -738,8 +748,9 @@ function setupEvents() {
   });
 
   els.trendTabs?.addEventListener("click", (e) => {
-    if (e.target.dataset.tab) {
-      state.activeTrendTab = e.target.dataset.tab;
+    const target = e.target.closest("[data-tab]");
+    if (target?.dataset.tab) {
+      state.activeTrendTab = target.dataset.tab;
       els.trendTabs.querySelectorAll(".segment").forEach(btn => btn.classList.toggle("active", btn.dataset.tab === state.activeTrendTab));
       renderGroupChart();
     }
@@ -788,16 +799,14 @@ function schedulePoll() {
 }
 
 async function bootstrap() {
-  // Intro animation
-  document.body.style.opacity = '0';
   setTimeout(() => {
-    document.body.style.transition = 'opacity 0.8s cubic-bezier(0.2, 0, 0, 1)';
-    document.body.style.opacity = '1';
+    document.body.classList.add("is-ready");
   }, 100);
 
   initDateInputs();
   setRangeMode("7");
   setupEvents();
+  closeSidebarDrawer();
 
   try {
     const passed = await checkAuth();

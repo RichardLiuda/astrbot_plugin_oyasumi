@@ -40,7 +40,7 @@ def _resolve_plugin_data_dir(plugin_name: str) -> Path:
     "astrbot_plugin_oyasumi",
     "RichardLiu",
     "基于正则触发的早安晚安会话追踪插件，支持统计、修正与个性化分析。",
-    "v1.0.0",
+    "v1.1.0",
 )
 class OyasumiPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig | dict | None = None):
@@ -93,6 +93,39 @@ class OyasumiPlugin(Star):
                 self.standalone_webui_server = StandaloneWebUIServer(self)
                 try:
                     await self.standalone_webui_server.start()
+                except asyncio.CancelledError:
+                    logger.warning(
+                        "[oyasumi] standalone webui startup was cancelled, cleaning up and continuing without webui"
+                    )
+                    try:
+                        await asyncio.shield(self.standalone_webui_server.stop())
+                    except BaseException as cleanup_exc:
+                        logger.warning(
+                            "[oyasumi] standalone webui cleanup after cancelled startup raised: %s",
+                            cleanup_exc,
+                        )
+                    self.standalone_webui_server = None
+                    self._write_runtime_state(
+                        status="running",
+                        reason="webui_start_cancelled",
+                        webui_running=False,
+                    )
+                except Exception as exc:
+                    logger.error(
+                        "[oyasumi] standalone webui failed to start, plugin will continue without webui: %s",
+                        exc,
+                    )
+                    try:
+                        await asyncio.shield(self.standalone_webui_server.stop())
+                    except BaseException:
+                        pass
+                    self.standalone_webui_server = None
+                    self._write_runtime_state(
+                        status="running",
+                        reason="webui_start_failed",
+                        webui_running=False,
+                    )
+                else:
                     self._write_runtime_state(
                         status="running",
                         reason="webui_started",
@@ -104,12 +137,6 @@ class OyasumiPlugin(Star):
                         self.settings.standalone_webui_port,
                         self._instance_id,
                     )
-                except Exception as exc:
-                    logger.error(
-                        "[oyasumi] standalone webui failed to start, plugin will continue without webui: %s",
-                        exc,
-                    )
-                    self.standalone_webui_server = None
         logger.info(
             "[oyasumi] initialized, db=%s, enabled=%s, instance=%s",
             self.settings.db_path,
@@ -849,8 +876,8 @@ class OyasumiPlugin(Star):
             webui_running = False
             if self.standalone_webui_server is not None:
                 try:
-                    await self.standalone_webui_server.stop()
-                except Exception as exc:
+                    await asyncio.shield(self.standalone_webui_server.stop())
+                except BaseException as exc:
                     logger.warning(
                         "[oyasumi] standalone webui stop raised during shutdown | instance=%s | error=%s",
                         self._instance_id,

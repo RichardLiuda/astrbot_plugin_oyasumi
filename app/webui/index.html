@@ -13,7 +13,6 @@
   <link rel="stylesheet" href="/static/styles.css" />
 </head>
 <body class="dashboard-body">
-  <!-- 动态流体背景 -->
   <div class="mesh-bg" aria-hidden="true">
     <div class="mesh-orb orb-1"></div>
     <div class="mesh-orb orb-2"></div>
@@ -23,43 +22,78 @@
 
   <div id="drawer_backdrop" class="drawer-scrim" hidden></div>
 
-  <!-- MD3 Navigation Rail / Drawer -->
   <nav id="nav_rail" class="md3-nav-rail" aria-label="应用导航">
     <div class="nav-rail-header">
-      <div class="brand-badge medium">
-        <span class="material-symbols-rounded">nights_stay</span>
+      <div class="brand-mark">
+        <div class="brand-badge medium">
+          <span class="material-symbols-rounded">nights_stay</span>
+        </div>
+        <div class="brand-copy">
+          <span class="brand-title">Oyasumi</span>
+          <span class="brand-subtitle">群聊作息看板</span>
+        </div>
       </div>
-      <span class="brand-title">Oyasumi</span>
+
+      <div class="nav-rail-destinations">
+        <button class="nav-dest active" type="button" data-section-target="section_overview">
+          <div class="nav-indicator"><span class="material-symbols-rounded">dashboard</span></div>
+          <div>
+            <div class="nav-label">总览</div>
+            <div class="nav-dest-desc">时间范围与群体状态</div>
+          </div>
+          <span class="material-symbols-rounded nav-arrow">arrow_forward</span>
+        </button>
+        <button class="nav-dest" type="button" data-section-target="section_trends">
+          <div class="nav-indicator"><span class="material-symbols-rounded">monitoring</span></div>
+          <div>
+            <div class="nav-label">趋势</div>
+            <div class="nav-dest-desc">热力图与趋势走向</div>
+          </div>
+          <span class="material-symbols-rounded nav-arrow">arrow_forward</span>
+        </button>
+        <button class="nav-dest" type="button" data-section-target="section_leaderboard">
+          <div class="nav-indicator"><span class="material-symbols-rounded">leaderboard</span></div>
+          <div>
+            <div class="nav-label">排行</div>
+            <div class="nav-dest-desc">活跃成员与下钻入口</div>
+          </div>
+          <span class="material-symbols-rounded nav-arrow">arrow_forward</span>
+        </button>
+        <button class="nav-dest" type="button" data-section-target="section_user_detail">
+          <div class="nav-indicator"><span class="material-symbols-rounded">person_search</span></div>
+          <div>
+            <div class="nav-label">用户</div>
+            <div class="nav-dest-desc">个体明细与会话记录</div>
+          </div>
+          <span class="material-symbols-rounded nav-arrow">arrow_forward</span>
+        </button>
+        <button class="nav-dest" type="button" data-section-target="section_analysis">
+          <div class="nav-indicator"><span class="material-symbols-rounded">auto_awesome</span></div>
+          <div>
+            <div class="nav-label">分析</div>
+            <div class="nav-dest-desc">LLM 综合与个体洞察</div>
+          </div>
+          <span class="material-symbols-rounded nav-arrow">arrow_forward</span>
+        </button>
+        <button class="nav-dest" type="button" data-section-target="section_snapshot">
+          <div class="nav-indicator"><span class="material-symbols-rounded">data_object</span></div>
+          <div>
+            <div class="nav-label">快照</div>
+            <div class="nav-dest-desc">调试原始数据输出</div>
+          </div>
+          <span class="material-symbols-rounded nav-arrow">arrow_forward</span>
+        </button>
+      </div>
     </div>
 
-    <div class="nav-rail-destinations">
-      <button class="nav-dest active" type="button" data-section-target="section_overview">
-        <div class="nav-indicator"><span class="material-symbols-rounded">dashboard</span></div>
-        <span class="nav-label">总览</span>
-      </button>
-      <button class="nav-dest" type="button" data-section-target="section_trends">
-        <div class="nav-indicator"><span class="material-symbols-rounded">monitoring</span></div>
-        <span class="nav-label">趋势</span>
-      </button>
-      <button class="nav-dest" type="button" data-section-target="section_leaderboard">
-        <div class="nav-indicator"><span class="material-symbols-rounded">leaderboard</span></div>
-        <span class="nav-label">排行</span>
-      </button>
-      <button class="nav-dest" type="button" data-section-target="section_user_detail">
-        <div class="nav-indicator"><span class="material-symbols-rounded">person_search</span></div>
-        <span class="nav-label">用户</span>
-      </button>
-      <button class="nav-dest" type="button" data-section-target="section_analysis">
-        <div class="nav-indicator"><span class="material-symbols-rounded">auto_awesome</span></div>
-        <span class="nav-label">分析</span>
-      </button>
+    <div class="nav-meta">
+      <span class="nav-meta-label">当前视图</span>
+      <span class="nav-meta-value">群聊作息中枢</span>
+      <span class="md3-body-small text-variant">在同一套界面中完成观察、筛选、下钻与分析。</span>
     </div>
   </nav>
 
-  <!-- Main Content Area -->
   <main class="md3-main-content">
-    
-    <!-- Top App Bar -->
     <header class="md3-top-app-bar">
       <div class="app-bar-leading">
         <button id="nav_toggle_btn" class="md3-icon-btn" type="button" aria-label="打开菜单">
@@ -67,91 +101,117 @@
         </button>
         <div class="app-title-group">
           <h1 class="md3-title-large">群聊作息看板</h1>
+          <p class="md3-body-small">统一查看群体节律、成员变化与 LLM 洞察。</p>
         </div>
       </div>
       <div class="app-bar-trailing">
-        <span class="md3-chip status-chip" id="status_pill">
-          <span class="status-dot" id="status_dot"></span>
-          <span id="status_text">就绪</span>
-        </span>
-        <button id="refresh_btn" class="md3-fab secondary small" type="button" title="刷新数据">
-          <span class="material-symbols-rounded">refresh</span>
-        </button>
-        <button id="logout_btn" class="md3-icon-btn logout-btn" type="button" title="退出" hidden>
-          <span class="material-symbols-rounded">logout</span>
-        </button>
+        <div class="app-bar-actions">
+          <span class="md3-chip status-chip" id="status_pill">
+            <span class="status-dot" id="status_dot"></span>
+            <span id="status_text">就绪</span>
+          </span>
+          <button id="refresh_btn" class="md3-fab secondary small" type="button" title="刷新数据">
+            <span class="material-symbols-rounded">refresh</span>
+          </button>
+          <button id="logout_btn" class="md3-icon-btn logout-btn" type="button" title="退出" hidden>
+            <span class="material-symbols-rounded">logout</span>
+          </button>
+        </div>
       </div>
     </header>
 
-    <!-- Scrollable Workspace -->
     <div class="workspace-scroll">
       <div class="workspace-content">
-        
-        <!-- SECTION 1: Overview -->
-        <section id="section_overview" class="md3-section fade-in-up">
-          <div class="md3-elevated-card control-panel-card">
-            <div class="card-header-row">
-              <h2 class="md3-title-medium">时间范围控制</h2>
-              <span class="md3-body-small text-variant" id="last_updated">最近更新：--</span>
+        <section id="section_overview" class="md3-section fade-in-up hero-shell">
+          <div class="hero-banner">
+            <div class="hero-copy">
+              <span class="section-eyebrow">Oyasumi WebUI</span>
+              <h2 class="md3-title-large">集中查看群聊的睡眠节律、成员变化和分析结果。</h2>
+              <p class="md3-body-medium text-variant">
+                这里聚合了时间范围控制、群体趋势、成员排行、个体下钻与 LLM 分析，便于在同一页面完成查看和筛选。
+              </p>
             </div>
-            
-            <div class="control-actions">
-              <div class="md3-segmented-button" id="range_chips" role="tablist">
-                <button class="segment active" type="button" data-range="7">近 7 天</button>
-                <button class="segment" type="button" data-range="14">近 14 天</button>
-                <button class="segment" type="button" data-range="30">近 30 天</button>
-                <button class="segment" type="button" data-range="custom">自定义</button>
+            <div class="hero-metrics">
+              <div class="hero-stat">
+                <div class="hero-stat-label">看板定位</div>
+                <div class="hero-stat-value">群聊作息中枢</div>
               </div>
-
-              <div class="custom-range-group" id="custom_range" hidden>
-                <div class="md3-text-field compact">
-                  <input id="start_date" type="date" required />
-                  <label>起始日</label>
-                </div>
-                <div class="md3-text-field compact">
-                  <input id="end_date" type="date" required />
-                  <label>结束日</label>
-                </div>
+              <div class="hero-stat">
+                <div class="hero-stat-label">数据结构</div>
+                <div class="hero-stat-value">总览 / 趋势 / 用户 / 分析</div>
               </div>
-            </div>
-
-            <div class="control-switches">
-              <label class="md3-switch-wrapper">
-                <div class="md3-switch">
-                  <input id="auto_refresh_toggle" type="checkbox" checked />
-                  <span class="slider"></span>
-                </div>
-                <span class="md3-label-large">15 秒自动刷新</span>
-              </label>
-              <label class="md3-switch-wrapper">
-                <div class="md3-switch">
-                  <input id="show_full_id_toggle" type="checkbox" />
-                  <span class="slider"></span>
-                </div>
-                <span class="md3-label-large">显示完整用户 ID</span>
-              </label>
+              <div class="hero-stat">
+                <div class="hero-stat-label">最近刷新</div>
+                <div class="hero-stat-value" id="last_updated">最近更新：--</div>
+              </div>
             </div>
           </div>
 
-          <!-- KPI Grid -->
+          <div class="md3-elevated-card control-panel-card">
+            <div class="section-header">
+              <div class="card-intro">
+                <span class="section-eyebrow">Range Controls</span>
+                <h2 class="md3-title-medium">时间范围与展示偏好</h2>
+                <p class="card-subtitle">切换时间窗口、自动刷新和用户 ID 显示方式，所有图表与明细都会联动更新。</p>
+              </div>
+            </div>
+
+            <div class="glass-inline-panel">
+              <div class="control-actions">
+                <div class="md3-segmented-button" id="range_chips" role="tablist" aria-label="时间范围">
+                  <button class="segment active" type="button" data-range="7">近 7 天</button>
+                  <button class="segment" type="button" data-range="14">近 14 天</button>
+                  <button class="segment" type="button" data-range="30">近 30 天</button>
+                  <button class="segment" type="button" data-range="custom">自定义</button>
+                </div>
+
+                <div class="custom-range-group" id="custom_range" hidden>
+                  <div class="md3-text-field compact">
+                    <input id="start_date" type="date" required />
+                    <label>起始日</label>
+                  </div>
+                  <div class="md3-text-field compact">
+                    <input id="end_date" type="date" required />
+                    <label>结束日</label>
+                  </div>
+                </div>
+              </div>
+
+              <div class="control-switches">
+                <label class="md3-switch-wrapper">
+                  <div class="md3-switch">
+                    <input id="auto_refresh_toggle" type="checkbox" checked />
+                    <span class="slider"></span>
+                  </div>
+                  <span class="md3-body-small">15 秒自动刷新</span>
+                </label>
+                <label class="md3-switch-wrapper">
+                  <div class="md3-switch">
+                    <input id="show_full_id_toggle" type="checkbox" />
+                    <span class="slider"></span>
+                  </div>
+                  <span class="md3-body-small">显示完整用户 ID</span>
+                </label>
+              </div>
+            </div>
+
           <div class="kpi-grid-premium" id="kpi_grid"></div>
         </section>
 
-        <!-- SECTION 2: Trends -->
         <section id="section_trends" class="md3-section fade-in-up" style="animation-delay: 0.1s">
           <div class="md3-elevated-card chart-card-premium">
-            <div class="card-header-row">
-              <div>
+            <div class="section-header">
+              <div class="card-intro">
+                <span class="section-eyebrow">Trends</span>
                 <h2 class="md3-title-medium">群聊趋势可视化</h2>
-                <p class="md3-body-small text-variant mt-1">入睡与起床时间的热力分布及整体群聊走势。</p>
+                <p class="card-subtitle">在同一块画布里切换入睡热力图、起床热力图和综合趋势，观察群体节律的变化。</p>
               </div>
-              <div class="md3-segmented-button tonal" id="trend_tabs" role="tablist">
+              <div class="md3-segmented-button tonal" id="trend_tabs" role="tablist" aria-label="趋势图类型">
                 <button class="segment active" type="button" data-tab="sleep">入睡热力图</button>
                 <button class="segment" type="button" data-tab="wake">起床热力图</button>
                 <button class="segment" type="button" data-tab="series">综合图表</button>
               </div>
             </div>
-            
             <div class="chart-container-premium">
               <div id="group_chart" class="echarts-host"></div>
               <div id="group_chart_fallback" class="chart-fallback" hidden></div>
@@ -159,52 +219,64 @@
           </div>
         </section>
 
-        <!-- SECTION 3: Leaderboard & User Drilldown -->
         <section id="section_leaderboard" class="md3-section fade-in-up" style="animation-delay: 0.15s">
           <div class="split-layout">
-            
-            <!-- Left: Leaderboard -->
             <div class="md3-elevated-card list-card-premium flex-column">
               <div class="card-header-row shrink-0">
-                <h2 class="md3-title-medium">Top 10 活跃领袖</h2>
-                <span class="md3-body-small text-variant">活跃度排名</span>
+                <div class="card-intro">
+                  <span class="section-eyebrow">Leaderboard</span>
+                  <h2 class="md3-title-medium">活跃成员排行</h2>
+                  <p class="card-subtitle">点击成员即可进入个体洞察与会话明细视图。</p>
+                </div>
+                <span class="md3-chip">Top 10</span>
               </div>
               <div class="md3-list-premium" id="leaderboard_list"></div>
             </div>
 
-            <!-- Right: User Insight -->
             <div class="md3-elevated-card insight-card-premium flex-column">
               <div class="card-header-row shrink-0">
-                <h2 class="md3-title-medium">用户专属图谱</h2>
+                <div class="card-intro">
+                  <span class="section-eyebrow">User Insight</span>
+                  <h2 class="md3-title-medium">用户专属图谱</h2>
+                  <p class="card-subtitle">查看入睡 / 起床习惯分布，以及关键指标的浓缩洞察。</p>
+                </div>
                 <span class="md3-chip tonal small" id="selected_user_hint">未选择</span>
               </div>
-              
+
               <div id="user_overview_empty" class="premium-empty-state">
                 <div class="icon-wrapper"><span class="material-symbols-rounded">person_search</span></div>
                 <p class="md3-body-large">请从左侧排行榜选择一位用户</p>
-                <p class="md3-body-small text-variant">解锁他/她的专属时段分布与数据洞察</p>
+                <p class="md3-body-small text-variant">选择后即可解锁专属时段分布、迷你 KPI 与个体趋势图。</p>
               </div>
-              
+
               <div id="user_overview_content" class="user-insight-content flex-column" hidden>
                 <div class="mini-kpi-row" id="user_kpi_grid"></div>
                 <div class="mini-charts-row">
-                  <div class="chart-box"><div id="user_sleep_hourly_chart" class="echarts-mini"></div></div>
-                  <div class="chart-box"><div id="user_wake_hourly_chart" class="echarts-mini"></div></div>
+                  <div class="chart-box">
+                    <span class="chart-caption">入睡时段分布</span>
+                    <div id="user_sleep_hourly_chart" class="echarts-mini"></div>
+                  </div>
+                  <div class="chart-box">
+                    <span class="chart-caption">起床时段分布</span>
+                    <div id="user_wake_hourly_chart" class="echarts-mini"></div>
+                  </div>
                 </div>
               </div>
             </div>
-
           </div>
         </section>
 
-        <!-- SECTION 4: Detail & Sessions -->
         <section id="section_user_detail" class="md3-section fade-in-up" style="animation-delay: 0.2s">
           <div class="md3-elevated-card detail-card-premium">
             <div class="card-header-row">
-              <h2 class="md3-title-medium">个体趋势明细</h2>
+              <div class="card-intro">
+                <span class="section-eyebrow">User Detail</span>
+                <h2 class="md3-title-medium">个体趋势明细</h2>
+                <p class="card-subtitle">这里是用户下钻的主工作区，包含趋势图、过滤器与原始会话列表。</p>
+              </div>
               <span class="md3-chip tonal small" id="user_detail_label">未选择用户</span>
             </div>
-            
+
             <div class="chart-container-premium low-profile">
               <div id="user_trend_chart" class="echarts-host"></div>
             </div>
@@ -254,7 +326,6 @@
           </div>
         </section>
 
-        <!-- SECTION 5: LLM Analysis -->
         <section id="section_analysis" class="md3-section fade-in-up" style="animation-delay: 0.25s">
           <div class="md3-elevated-card ai-card-premium">
             <details id="analysis_panel" class="md3-expansion-panel">
@@ -290,14 +361,13 @@
           </div>
         </section>
 
-        <!-- SECTION 6: Snapshot -->
         <section id="section_snapshot" class="md3-section fade-in-up" style="animation-delay: 0.3s">
           <div class="md3-elevated-card raw-card-premium">
             <details id="snapshot_panel" class="md3-expansion-panel">
               <summary class="md3-title-medium">
                 <div class="summary-content">
                   <span class="material-symbols-rounded">data_object</span>
-                  原始快照 (Snapshot)
+                  原始快照
                 </div>
                 <span class="material-symbols-rounded expand-icon">expand_more</span>
               </summary>

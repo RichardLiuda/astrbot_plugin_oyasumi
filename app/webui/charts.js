@@ -1,4 +1,4 @@
-﻿(function () {
+(function () {
   const brandColors = {
     primary: "#005cbb",      // MD3 Primary
     primaryContainer: "#d7e3ff",
@@ -361,8 +361,8 @@
       return "<div class='premium-empty-state minimal'><p>暂无趋势数据</p></div>";
     }
     return `
-      <div class="table-container-premium" style="max-height: 300px; margin-top:0; border:none; box-shadow:none;">
-        <table class="md3-table" style="margin:0;">
+      <div class="table-container-premium table-container-embedded">
+        <table class="md3-table">
           <thead>
             <tr><th>日期</th><th>时长(分)</th><th>会话</th><th>活跃用户</th></tr>
           </thead>
