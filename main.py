@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import uuid
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -38,7 +40,7 @@ def _resolve_plugin_data_dir(plugin_name: str) -> Path:
     "astrbot_plugin_oyasumi",
     "RichardLiu",
     "基于正则触发的早安晚安会话追踪插件，支持统计、修正与个性化分析。",
-    "v0.1.0",
+    "v1.0.0",
 )
 class OyasumiPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig | dict | None = None):
@@ -67,9 +69,19 @@ class OyasumiPlugin(Star):
         self.snapshot_service = SnapshotService(self.settings.snapshot_path)
         self.standalone_webui_server: StandaloneWebUIServer | None = None
         self._background_tasks: set[asyncio.Task[None]] = set()
+        self._instance_id = uuid.uuid4().hex[:8]
+        self._runtime_state_path = self.settings.plugin_data_dir / "runtime_state.json"
+        self._shutdown_lock = asyncio.Lock()
+        self._is_terminated = False
 
     async def initialize(self) -> None:
+        self._log_unclean_previous_runtime()
         await self.repository.initialize()
+        self._write_runtime_state(
+            status="running",
+            reason="initialize",
+            webui_running=False,
+        )
         self._register_web_apis()
         if self.settings.standalone_webui_enabled:
             if not self.settings.standalone_webui_token:
@@ -81,10 +93,16 @@ class OyasumiPlugin(Star):
                 self.standalone_webui_server = StandaloneWebUIServer(self)
                 try:
                     await self.standalone_webui_server.start()
+                    self._write_runtime_state(
+                        status="running",
+                        reason="webui_started",
+                        webui_running=True,
+                    )
                     logger.info(
-                        "[oyasumi] standalone webui started at http://%s:%s",
+                        "[oyasumi] standalone webui started at http://%s:%s | instance=%s",
                         self.settings.standalone_webui_host,
                         self.settings.standalone_webui_port,
+                        self._instance_id,
                     )
                 except Exception as exc:
                     logger.error(
@@ -93,22 +111,14 @@ class OyasumiPlugin(Star):
                     )
                     self.standalone_webui_server = None
         logger.info(
-            "[oyasumi] initialized, db=%s, enabled=%s",
+            "[oyasumi] initialized, db=%s, enabled=%s, instance=%s",
             self.settings.db_path,
             self.settings.enabled,
+            self._instance_id,
         )
 
     async def terminate(self) -> None:
-        if self._background_tasks:
-            pending = list(self._background_tasks)
-            self._background_tasks.clear()
-            for task in pending:
-                task.cancel()
-            await asyncio.gather(*pending, return_exceptions=True)
-        if self.standalone_webui_server is not None:
-            await self.standalone_webui_server.stop()
-            self.standalone_webui_server = None
-        await self.repository.close()
+        await self._shutdown_resources(reason="terminate")
 
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def on_message(self, event: AstrMessageEvent):
@@ -801,3 +811,122 @@ class OyasumiPlugin(Star):
         except ValueError:
             return False
         return end_obj >= start_obj
+
+    async def _shutdown_resources(self, *, reason: str) -> None:
+        async with self._shutdown_lock:
+            if self._is_terminated:
+                return
+            self._is_terminated = True
+
+            logger.info(
+                "[oyasumi] shutdown start | reason=%s | instance=%s",
+                reason,
+                self._instance_id,
+            )
+
+            if self._background_tasks:
+                pending = list(self._background_tasks)
+                self._background_tasks.clear()
+                for task in pending:
+                    task.cancel()
+                await asyncio.gather(*pending, return_exceptions=True)
+
+            webui_running = False
+            if self.standalone_webui_server is not None:
+                try:
+                    await self.standalone_webui_server.stop()
+                except Exception as exc:
+                    logger.warning(
+                        "[oyasumi] standalone webui stop raised during shutdown | instance=%s | error=%s",
+                        self._instance_id,
+                        exc,
+                    )
+                finally:
+                    self.standalone_webui_server = None
+
+            try:
+                await self.repository.close()
+            except Exception as exc:
+                logger.warning(
+                    "[oyasumi] repository close raised during shutdown | instance=%s | error=%s",
+                    self._instance_id,
+                    exc,
+                )
+
+            self._write_runtime_state(
+                status="stopped",
+                reason=reason,
+                webui_running=webui_running,
+            )
+            logger.info(
+                "[oyasumi] shutdown complete | reason=%s | instance=%s",
+                reason,
+                self._instance_id,
+            )
+
+    def _runtime_state_payload(
+        self,
+        *,
+        status: str,
+        reason: str,
+        webui_running: bool,
+    ) -> dict[str, Any]:
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        return {
+            "plugin": PLUGIN_NAME,
+            "instance_id": self._instance_id,
+            "pid": os.getpid(),
+            "status": status,
+            "reason": reason,
+            "updated_at": now,
+            "host": self.settings.standalone_webui_host,
+            "port": self.settings.standalone_webui_port,
+            "standalone_webui_enabled": self.settings.standalone_webui_enabled,
+            "webui_running": webui_running,
+            "db_path": str(self.settings.db_path),
+        }
+
+    def _write_runtime_state(
+        self,
+        *,
+        status: str,
+        reason: str,
+        webui_running: bool,
+    ) -> None:
+        temp_path = self._runtime_state_path.with_suffix(".tmp")
+        payload = self._runtime_state_payload(
+            status=status,
+            reason=reason,
+            webui_running=webui_running,
+        )
+        try:
+            temp_path.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            temp_path.replace(self._runtime_state_path)
+        except Exception as exc:
+            logger.warning("[oyasumi] failed to persist runtime state: %s", exc)
+
+    def _read_runtime_state(self) -> dict[str, Any] | None:
+        if not self._runtime_state_path.exists():
+            return None
+        try:
+            return json.loads(self._runtime_state_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            logger.warning("[oyasumi] failed to read runtime state: %s", exc)
+            return None
+
+    def _log_unclean_previous_runtime(self) -> None:
+        runtime_state = self._read_runtime_state()
+        if not runtime_state:
+            return
+        if runtime_state.get("status") != "running":
+            return
+        logger.warning(
+            "[oyasumi] previous runtime did not exit cleanly | prev_instance=%s | prev_pid=%s | updated_at=%s | webui_running=%s",
+            runtime_state.get("instance_id"),
+            runtime_state.get("pid"),
+            runtime_state.get("updated_at"),
+            runtime_state.get("webui_running"),
+        )

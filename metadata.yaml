@@ -1,6 +1,6 @@
 name: astrbot_plugin_oyasumi
 display_name: 睡了喵~
 desc: 基于正则触发的早安晚安长期记录插件，可自定义触发词，支持统计、修正与 llm 个性化分析，配套 webui。
-version: v0.1.3
+version: v1.0.0
 author: RichardLiu
 repo: https://github.com/RichardLiuda/astrbot_plugin_oyasumi

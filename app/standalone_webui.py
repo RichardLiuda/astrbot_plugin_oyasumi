@@ -4,6 +4,7 @@ import asyncio
 import hmac
 import http.client
 import secrets
+from weakref import WeakValueDictionary
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,9 @@ from astrbot.api import logger
 
 
 class StandaloneWebUIServer:
+    _ACTIVE_SERVERS: "WeakValueDictionary[str, StandaloneWebUIServer]" = (
+        WeakValueDictionary()
+    )
     _SESSION_COOKIE_NAME = "oyasumi_webui_session"
     _SESSION_TTL = timedelta(hours=12)
     _LOGIN_WINDOW = timedelta(minutes=10)
@@ -23,6 +27,8 @@ class StandaloneWebUIServer:
     _LOGIN_MAX_ATTEMPTS = 8
     _START_RECOVERY_TIMEOUT_SEC = 10.0
     _START_RECOVERY_STEP_SEC = 0.25
+    _STOP_WAIT_TIMEOUT_SEC = 5.0
+    _STOP_WAIT_STEP_SEC = 0.2
     _INTERNAL_SHUTDOWN_PATH = "/__oyasumi_internal/shutdown"
     _INTERNAL_SHUTDOWN_HEADER = "X-Oyasumi-Shutdown-Token"
 
@@ -50,6 +56,7 @@ class StandaloneWebUIServer:
                 "standalone_webui_token must be configured and non-empty"
             )
 
+        await self._stop_local_stale_server()
         if await self._is_port_in_use():
             logger.warning(
                 "[oyasumi] standalone webui port is occupied, trying graceful recovery: %s:%s",
@@ -73,17 +80,26 @@ class StandaloneWebUIServer:
         self._serve_task = asyncio.create_task(
             serve(self.app, config, shutdown_trigger=self._shutdown_trigger)
         )
+        self._register_active_server()
+        self._serve_task.add_done_callback(self._on_serve_task_done)
         await asyncio.sleep(0)
         if self._serve_task.done():
             exc = self._serve_task.exception()
             if exc is not None:
                 self._serve_task = None
+                self._unregister_active_server()
                 raise exc
 
     async def stop(self) -> None:
         if not self._serve_task:
+            self._unregister_active_server()
             return
 
+        logger.info(
+            "[oyasumi] standalone webui stop requested: %s:%s",
+            self.settings.standalone_webui_host,
+            self.settings.standalone_webui_port,
+        )
         self._shutdown_event.set()
         try:
             await asyncio.wait_for(self._serve_task, timeout=8)
@@ -99,6 +115,20 @@ class StandaloneWebUIServer:
             logger.warning("[oyasumi] standalone webui stop failed: %s", exc)
         finally:
             self._serve_task = None
+            self._unregister_active_server()
+
+        if await self._wait_for_port_released():
+            logger.info(
+                "[oyasumi] standalone webui stopped and port released: %s:%s",
+                self.settings.standalone_webui_host,
+                self.settings.standalone_webui_port,
+            )
+        else:
+            logger.warning(
+                "[oyasumi] standalone webui task stopped but port is still occupied: %s:%s",
+                self.settings.standalone_webui_host,
+                self.settings.standalone_webui_port,
+            )
 
     async def _shutdown_trigger(self) -> None:
         await self._shutdown_event.wait()
@@ -421,14 +451,14 @@ class StandaloneWebUIServer:
         return True
 
     async def _recover_occupied_port(self) -> bool:
-        sent = await self._request_internal_shutdown()
-        if not sent:
-            return False
-
-        wait_steps = int(
-            self._START_RECOVERY_TIMEOUT_SEC / self._START_RECOVERY_STEP_SEC
+        wait_steps = max(
+            1,
+            int(self._START_RECOVERY_TIMEOUT_SEC / self._START_RECOVERY_STEP_SEC),
         )
-        for _ in range(max(1, wait_steps)):
+        shutdown_requested = False
+        for _ in range(wait_steps):
+            if await self._request_internal_shutdown():
+                shutdown_requested = True
             if not await self._is_port_in_use():
                 logger.info(
                     "[oyasumi] standalone webui port recovered: %s:%s",
@@ -437,6 +467,19 @@ class StandaloneWebUIServer:
                 )
                 return True
             await asyncio.sleep(self._START_RECOVERY_STEP_SEC)
+        if shutdown_requested:
+            logger.warning(
+                "[oyasumi] standalone webui shutdown was requested but the port is still busy after %.1fs: %s:%s",
+                self._START_RECOVERY_TIMEOUT_SEC,
+                self.settings.standalone_webui_host,
+                self.settings.standalone_webui_port,
+            )
+        else:
+            logger.warning(
+                "[oyasumi] standalone webui graceful recovery request was not accepted: %s:%s",
+                self.settings.standalone_webui_host,
+                self.settings.standalone_webui_port,
+            )
         return False
 
     async def _request_internal_shutdown(self) -> bool:
@@ -469,6 +512,56 @@ class StandaloneWebUIServer:
     async def _trigger_internal_shutdown(self) -> None:
         await asyncio.sleep(0)
         self._shutdown_event.set()
+
+    def _bind_key(self) -> str:
+        return (
+            f"{self.settings.standalone_webui_host}:"
+            f"{int(self.settings.standalone_webui_port)}"
+        )
+
+    def _register_active_server(self) -> None:
+        self._ACTIVE_SERVERS[self._bind_key()] = self
+
+    def _unregister_active_server(self) -> None:
+        bind_key = self._bind_key()
+        current = self._ACTIVE_SERVERS.get(bind_key)
+        if current is self:
+            self._ACTIVE_SERVERS.pop(bind_key, None)
+
+    def _on_serve_task_done(self, task: asyncio.Task | None) -> None:
+        self._unregister_active_server()
+
+    async def _stop_local_stale_server(self) -> None:
+        bind_key = self._bind_key()
+        active = self._ACTIVE_SERVERS.get(bind_key)
+        if active is None or active is self:
+            return
+        if active._serve_task is None or active._serve_task.done():
+            active._unregister_active_server()
+            return
+
+        logger.warning(
+            "[oyasumi] found stale standalone webui instance in current process, stopping it: %s",
+            bind_key,
+        )
+        try:
+            await active.stop()
+        except Exception as exc:
+            logger.warning(
+                "[oyasumi] failed to stop stale standalone webui instance in current process: %s",
+                exc,
+            )
+
+    async def _wait_for_port_released(self) -> bool:
+        wait_steps = max(
+            1,
+            int(self._STOP_WAIT_TIMEOUT_SEC / self._STOP_WAIT_STEP_SEC),
+        )
+        for _ in range(wait_steps):
+            if not await self._is_port_in_use():
+                return True
+            await asyncio.sleep(self._STOP_WAIT_STEP_SEC)
+        return not await self._is_port_in_use()
 
     def _resolve_probe_host(self) -> str:
         host = str(self.settings.standalone_webui_host or "127.0.0.1")
