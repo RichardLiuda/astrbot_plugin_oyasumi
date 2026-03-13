@@ -213,6 +213,148 @@ class StatsService:
             "wake_heatmap": wake_heatmap,
         }
 
+    async def build_group_analysis_context(
+        self,
+        *,
+        start_date: str,
+        end_date: str,
+        leaderboard_limit: int = 10,
+        include_records_limit: int = 20,
+    ) -> str:
+        summary = await self.build_summary(
+            user_id=None,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        overview = await self.build_group_overview(
+            start_date=start_date,
+            end_date=end_date,
+        )
+        leaderboard = await self.build_leaderboard(
+            start_date=start_date,
+            end_date=end_date,
+            limit=leaderboard_limit,
+            metric="activity",
+        )
+
+        kpis = overview.get("kpis") or {}
+        daily_series = overview.get("daily_series") or []
+        top_items = leaderboard.get("items") or []
+        participant_session_count: dict[str, int] = {}
+        participant_total_sleep: dict[str, int] = {}
+        late_sleep_user_ids: set[str] = set()
+        late_sleep_count = 0
+
+        for row in summary.records:
+            user_id = str(row.get("user_id") or "").strip()
+            if user_id:
+                participant_session_count[user_id] = (
+                    participant_session_count.get(user_id, 0) + 1
+                )
+                participant_total_sleep[user_id] = participant_total_sleep.get(
+                    user_id, 0
+                ) + int(row.get("duration_minutes") or 0)
+            if _is_late_sleep_time(str(row.get("sleep_time") or "")):
+                late_sleep_count += 1
+                if user_id:
+                    late_sleep_user_ids.add(user_id)
+
+        active_days = [
+            row for row in daily_series if int(row.get("session_count") or 0) > 0
+        ]
+        peak_day = (
+            max(
+                active_days,
+                key=lambda row: (
+                    int(row.get("session_count") or 0),
+                    int(row.get("active_user_count") or 0),
+                    int(row.get("total_minutes") or 0),
+                ),
+            )
+            if active_days
+            else None
+        )
+        top_participants = sorted(
+            participant_session_count.items(),
+            key=lambda item: (-item[1], item[0]),
+        )[:5]
+        late_sleep_rate = (
+            round(late_sleep_count / summary.total_sessions, 4)
+            if summary.total_sessions
+            else 0.0
+        )
+        avg_active_users = (
+            round(
+                sum(int(row.get("active_user_count") or 0) for row in active_days)
+                / len(active_days),
+                1,
+            )
+            if active_days
+            else 0.0
+        )
+
+        lines = [
+            "统计对象：全体成员综合分析",
+            f"统计区间：{start_date} ~ {end_date}",
+            "群体指标：",
+            f"- 活跃成员数：{int(kpis.get('active_user_count') or 0)}",
+            f"- 闭合会话数：{summary.total_sessions}",
+            f"- 总睡眠时长：{summary.total_sleep_minutes} 分钟",
+            f"- 平均睡眠时长：{summary.avg_sleep_minutes} 分钟",
+            f"- 当前进行中会话：{summary.open_session_count}",
+            f"- 孤立早安事件：{summary.orphan_morning_count}",
+            f"- 自动补全会话占比：{float(kpis.get('auto_fill_ratio') or 0.0):.1%}",
+            f"- 晚睡会话占比：{late_sleep_rate:.1%} ({late_sleep_count}/{summary.total_sessions})",
+            f"- 涉及晚睡的成员数：{len(late_sleep_user_ids)}",
+            f"- 最早入睡：{summary.earliest_sleep_time or '-'}",
+            f"- 最晚入睡：{summary.latest_sleep_time or '-'}",
+            f"- 最早醒来：{summary.earliest_wake_time or '-'}",
+            f"- 最晚醒来：{summary.latest_wake_time or '-'}",
+            f"- 有活动日期的日均活跃成员数：{avg_active_users}",
+        ]
+        if peak_day:
+            lines.append(
+                "- 峰值日期："
+                f"{peak_day.get('stat_date')} "
+                f"(会话 {int(peak_day.get('session_count') or 0)} 条, "
+                f"活跃成员 {int(peak_day.get('active_user_count') or 0)} 人, "
+                f"总睡眠 {int(peak_day.get('total_minutes') or 0)} 分钟)"
+            )
+
+        if top_participants:
+            lines.append("成员会话分布 Top 5：")
+            for user_id, session_count in top_participants:
+                total_minutes = participant_total_sleep.get(user_id, 0)
+                avg_minutes = int(total_minutes / session_count) if session_count else 0
+                lines.append(
+                    f"- {user_id} | 会话 {session_count} 次 | "
+                    f"总睡眠 {total_minutes} 分钟 | 平均 {avg_minutes} 分钟"
+                )
+
+        if top_items:
+            lines.append(f"活跃榜 Top {len(top_items)}：")
+            for item in top_items:
+                lines.append(
+                    f"- {item.get('user_id') or '-'} | 活跃度 {int(item.get('activity_count') or 0)} | "
+                    f"总睡眠 {int(item.get('total_sleep_minutes') or 0)} 分钟 | "
+                    f"平均 {int(item.get('avg_sleep_minutes') or 0)} 分钟 | "
+                    f"最近活动 {item.get('last_event_time') or '-'}"
+                )
+
+        if not summary.records:
+            lines.append("区间内暂无闭合会话记录。")
+            return "\n".join(lines)
+
+        lines.append("近期会话样本：")
+        for row in summary.records[:include_records_limit]:
+            lines.append(
+                f"- 用户:{row.get('user_id') or '-'} | 日期:{row.get('stat_date') or '-'} | "
+                f"入睡:{row.get('sleep_time') or '-'} | 醒来:{row.get('wake_time') or '-'} | "
+                f"时长:{int(row.get('duration_minutes') or 0)}分钟 | "
+                f"自动补全:{'是' if int(row.get('is_auto_filled') or 0) == 1 else '否'}"
+            )
+        return "\n".join(lines)
+
     async def build_leaderboard(
         self,
         *,

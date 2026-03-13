@@ -1,4 +1,4 @@
-﻿const $ = (id) => document.getElementById(id);
+const $ = (id) => document.getElementById(id);
 
 const SECTION_IDS = [
   "section_overview",
@@ -42,6 +42,10 @@ const els = {
   sessionDateFilter: $("session_date_filter"),
   userSessionsTbody: $("user_sessions_tbody"),
   snapshotJson: $("snapshot_json"),
+  analysisScopeSwitch: $("analysis_scope_switch"),
+  analysisScopeGroup: $("analysis_scope_group"),
+  analysisScopeUser: $("analysis_scope_user"),
+  analysisScopeHint: $("analysis_scope_hint"),
   analysisBtn: $("analysis_btn"),
   analysisState: $("analysis_state"),
   analysisMd: $("analysis_md"),
@@ -55,6 +59,7 @@ const state = {
   showFullId: false,
   activeTrendTab: "series", // Default to series for better initial view
   selectedUserId: "",
+  analysisScope: "group",
   activeSection: "section_overview",
   drawerOpen: false,
   sectionObserver: null,
@@ -97,6 +102,29 @@ function setBusy(busy) {
 
 function setStatus(text) {
   els.statusText.textContent = text;
+}
+
+function normalizedAnalysisScope() {
+  return state.analysisScope === "user" ? "user" : "group";
+}
+
+function syncAnalysisScopeControls() {
+  const scope = normalizedAnalysisScope();
+  [els.analysisScopeGroup, els.analysisScopeUser].forEach((btn) => {
+    if (!btn) return;
+    btn.classList.toggle("active", btn.dataset.scope === scope);
+  });
+
+  if (!els.analysisScopeHint) return;
+  if (scope === "user") {
+    if (state.selectedUserId) {
+      els.analysisScopeHint.textContent = `当前范围：用户 ${maskUserId(state.selectedUserId)} 的个体分析`;
+      return;
+    }
+    els.analysisScopeHint.textContent = "当前范围：当前用户分析（请先从排行榜选择用户）";
+    return;
+  }
+  els.analysisScopeHint.textContent = "当前范围：全体成员综合分析";
 }
 
 function notify(message, error = false) {
@@ -433,6 +461,7 @@ function renderUserOverview() {
     els.userOverviewContent.hidden = true;
     els.selectedUserHint.textContent = "未选择";
     els.userDetailLabel.textContent = "未选择用户";
+    syncAnalysisScopeControls();
     els.userKpiGrid.innerHTML = "";
     clearChart("userTrend"); clearChart("userSleepHourly"); clearChart("userWakeHourly");
     if (!hasEcharts) {
@@ -447,6 +476,7 @@ function renderUserOverview() {
   els.userOverviewContent.hidden = false;
   els.selectedUserHint.textContent = `${userIdLabel}`;
   els.userDetailLabel.textContent = `${userIdLabel}`;
+  syncAnalysisScopeControls();
 
   const miniCards = [
     { label: "会话总计", value: String(kpis.total_sessions || 0) },
@@ -637,29 +667,41 @@ function markdownToHtml(markdown) {
 
 async function handleGenerateAnalysis() {
   const rangeParams = concreteRangeFromOverview();
+  let scope = normalizedAnalysisScope();
+  if (scope === "user" && !state.selectedUserId) {
+    scope = "group";
+    state.analysisScope = "group";
+    syncAnalysisScopeControls();
+    notify("尚未选择用户，已切换为全体成员综合分析");
+  }
   const options = {
     start_date: rangeParams.start_date,
     end_date: rangeParams.end_date,
-    user_id: state.selectedUserId || undefined,
+    scope,
+    user_id: scope === "user" ? (state.selectedUserId || undefined) : undefined,
   };
 
   els.analysisBtn.disabled = true;
-  els.analysisState.textContent = "LLM 大模型深度分析中...";
+  els.analysisState.textContent = scope === "group"
+    ? "LLM 正在综合分析全体成员作息..."
+    : "LLM 正在分析当前用户作息...";
   try {
     reportClientLog("info", "Generating analysis", {
+      scope,
       user_id: state.selectedUserId || "",
       start_date: options.start_date,
       end_date: options.end_date,
     });
     const payload = await api("/api/analysis", "POST", options);
     if (!payload.analysis_text) throw new Error("返回数据结构异常");
-    els.analysisState.textContent = "分析已完成";
+    els.analysisState.textContent = scope === "group" ? "全体成员综合分析已完成" : "用户分析已完成";
     els.analysisMd.innerHTML = markdownToHtml(payload.analysis_text);
   } catch (error) {
     els.analysisState.textContent = "分析失败";
     els.analysisMd.innerHTML = `<p style="color:red;">异常：${escapeHtml(error.message || String(error))}</p>`;
     reportClientLog("error", "Analysis generation failed", {
       message: error.message || String(error),
+      scope,
       user_id: state.selectedUserId || "",
     });
     notify(error.message || "生成分析报告异常", true);
@@ -704,6 +746,12 @@ function setupEvents() {
   });
 
   els.leaderboardList?.addEventListener("click", onLeaderboardClick);
+  els.analysisScopeSwitch?.addEventListener("click", (event) => {
+    const target = event.target.closest("[data-scope]");
+    if (!target) return;
+    state.analysisScope = target.dataset.scope === "user" ? "user" : "group";
+    syncAnalysisScopeControls();
+  });
 
   ['sessionStatusFilter', 'sessionSourceFilter', 'sessionDateFilter'].forEach(id =>
     els[id]?.addEventListener("change", renderSessions)

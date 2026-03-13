@@ -4,10 +4,10 @@ import asyncio
 import hmac
 import http.client
 import secrets
-from weakref import WeakValueDictionary
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from weakref import WeakValueDictionary
 
 from hypercorn.asyncio import serve
 from hypercorn.config import Config as HyperConfig
@@ -17,7 +17,7 @@ from astrbot.api import logger
 
 
 class StandaloneWebUIServer:
-    _ACTIVE_SERVERS: "WeakValueDictionary[str, StandaloneWebUIServer]" = (
+    _ACTIVE_SERVERS: WeakValueDictionary[str, StandaloneWebUIServer] = (
         WeakValueDictionary()
     )
     _SESSION_COOKIE_NAME = "oyasumi_webui_session"
@@ -389,16 +389,15 @@ class StandaloneWebUIServer:
             extra = payload.get("extra")
 
             if not message:
-                return jsonify({"status": "error", "message": "message is required"}), 400
+                return jsonify(
+                    {"status": "error", "message": "message is required"}
+                ), 400
 
             if len(message) > 500:
                 message = message[:500]
 
             if isinstance(extra, dict):
-                safe_extra = {
-                    str(k)[:80]: str(v)[:300]
-                    for k, v in extra.items()
-                }
+                safe_extra = {str(k)[:80]: str(v)[:300] for k, v in extra.items()}
             else:
                 safe_extra = {"value": str(extra)[:300]} if extra is not None else {}
 

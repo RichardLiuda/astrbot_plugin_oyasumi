@@ -1,4 +1,4 @@
-﻿/* =========================================================================
+/* =========================================================================
    Oyasumi WebUI - Premium MD3 Stylesheet
    ========================================================================= */
 
@@ -506,7 +506,19 @@ body {
 .summary-content .ai-sparkle { color: #8b5cf6; } 
 .md3-expansion-panel[open] summary .expand-icon { transform: rotate(180deg); transition: 0.3s; }
 .panel-content { padding: 0 20px 20px; border-top: 1px solid rgba(0,0,0,0.04); margin-top: 12px; padding-top: 16px;}
-.ai-toolbar { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; }
+.ai-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+.ai-scope-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 240px;
+}
 
 /* AI Generated Markdown Pro Styles */
 .md3-markdown-body {

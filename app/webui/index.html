@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
@@ -261,12 +261,19 @@
               <summary class="md3-title-medium">
                 <div class="summary-content">
                   <span class="material-symbols-rounded ai-sparkle">auto_awesome</span>
-                  LLM 个性化作息分析
+                  LLM 作息分析
                 </div>
                 <span class="material-symbols-rounded expand-icon">expand_more</span>
               </summary>
               <div class="panel-content">
                 <div class="ai-toolbar">
+                  <div class="ai-scope-controls">
+                    <div class="md3-segmented-button tonal" id="analysis_scope_switch" role="tablist" aria-label="分析范围">
+                      <button id="analysis_scope_group" class="segment active" type="button" data-scope="group">全体成员</button>
+                      <button id="analysis_scope_user" class="segment" type="button" data-scope="user">当前用户</button>
+                    </div>
+                    <span id="analysis_scope_hint" class="md3-body-small text-variant">当前范围：全体成员综合分析</span>
+                  </div>
                   <button id="analysis_btn" class="md3-fab-extended primary" type="button">
                     <span class="material-symbols-rounded">magic_button</span>
                     <span>立即生成深度分析</span>
@@ -275,7 +282,7 @@
                 </div>
                 <div id="analysis_md" class="md3-markdown-body">
                   <div class="premium-empty-state minimal">
-                    <p>点击上方按钮生成基于当前数据的 Markdown 报告。</p>
+                    <p>点击上方按钮生成全体成员综合分析，或切换到当前用户查看个体作息报告。</p>
                   </div>
                 </div>
               </div>

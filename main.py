@@ -522,6 +522,9 @@ class OyasumiPlugin(Star):
         if unauthorized is not None:
             return unauthorized
         payload = await request.get_json(silent=True) or {}
+        scope = (payload.get("scope", "group") or "group").strip().lower()
+        if scope not in {"group", "user"}:
+            scope = "group"
         user_id = (payload.get("user_id", "") or "").strip() or None
         start_date = (payload.get("start_date", "") or "").strip()
         end_date = (payload.get("end_date", "") or "").strip()
@@ -544,19 +547,29 @@ class OyasumiPlugin(Star):
                 }
             )
 
-        summary = await self.stats_service.build_summary(
-            user_id=user_id,
-            start_date=resolved_start,
-            end_date=resolved_end,
-        )
-        stats_text = summary.to_text(include_records_limit=20)
+        requested_user_name = (payload.get("user_name", "") or "").strip()
+        if scope == "user" and user_id:
+            summary = await self.stats_service.build_summary(
+                user_id=user_id,
+                start_date=resolved_start,
+                end_date=resolved_end,
+            )
+            stats_text = summary.to_text(include_records_limit=20)
+            analysis_subject = requested_user_name or user_id or "webui_user"
+        else:
+            scope = "group"
+            stats_text = await self.stats_service.build_group_analysis_context(
+                start_date=resolved_start,
+                end_date=resolved_end,
+            )
+            analysis_subject = requested_user_name or "全体成员"
         (
             analysis_text,
             used_llm,
             llm_reason,
         ) = await self.response_service.build_analysis_reply_with_meta(
             umo=(payload.get("umo") or "oyasumi_webui"),
-            user_name=(payload.get("user_name") or user_id or "webui_user"),
+            user_name=analysis_subject,
             stats_text=stats_text,
         )
 
@@ -568,6 +581,8 @@ class OyasumiPlugin(Star):
                     "stats_text": stats_text,
                     "used_llm": used_llm,
                     "llm_reason": llm_reason,
+                    "analysis_scope": scope,
+                    "analysis_subject": analysis_subject,
                     "start_date": resolved_start,
                     "end_date": resolved_end,
                 },

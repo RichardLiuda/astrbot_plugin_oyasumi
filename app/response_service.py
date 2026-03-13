@@ -106,15 +106,30 @@ class ResponseService:
         if not provider_id:
             return ("未找到可用模型，无法生成分析。", False, "provider_not_found")
 
+        is_group_analysis = (
+            user_name == "全体成员" or "统计对象：全体成员综合分析" in stats_text
+        )
+        target_label = "分析对象" if is_group_analysis else "用户昵称"
+        radar_focus = (
+            "成员分布、整体节律稳定性、群体晚睡倾向、补觉迹象"
+            if is_group_analysis
+            else "节律稳定性、晚睡倾向、补觉迹象"
+        )
+        action_focus = (
+            "面向群聊全体成员给出3条可执行建议"
+            if is_group_analysis
+            else "给出3条可执行建议"
+        )
+
         prompt = (
-            f"用户昵称：{user_name}\n"
+            f"{target_label}：{user_name}\n"
             f"睡眠统计数据：\n{stats_text}\n\n"
             "请按以下规则输出 Markdown：\n"
             "1. 语气贴近二次元群聊，轻松、有梗、友好，不要冒犯或阴阳怪气。\n"
             "2. 使用标题结构：`## 作息播报`、`## 规律雷达`、`## 明日行动清单`。\n"
             "3. 在“作息播报”中给出一句总结和1-2个关键数字。\n"
-            "4. 在“规律雷达”中点评节律稳定性、晚睡倾向、补觉迹象。\n"
-            "5. 在“明日行动清单”中给出3条可执行建议，用有序列表输出。\n"
+            f"4. 在“规律雷达”中点评{radar_focus}。\n"
+            f"5. 在“明日行动清单”中{action_focus}，用有序列表输出。\n"
             "6. 允许少量 ACG 风格词汇或颜文字，但保持信息密度，避免过度玩梗。\n"
             "7. 结尾补一句简短鼓励，不要超过20字。"
         )
