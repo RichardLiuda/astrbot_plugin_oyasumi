@@ -155,6 +155,7 @@ class ResponseService:
             "user_name": user_name,
             "sleep_time": result.sleep_time or "-",
             "wake_time": result.wake_time or "-",
+            "duration_human": self._format_duration_text(result.duration_minutes),
             "duration_minutes": (
                 str(result.duration_minutes)
                 if result.duration_minutes is not None
@@ -169,8 +170,6 @@ class ResponseService:
                 text = self._render_template(self.settings.duplicate_night_reply, data)
                 return self._apply_catgirl_tone(text, style="duplicate")
             base_text = self._render_template(self.settings.night_static_reply, data)
-            if result.message_hint:
-                base_text = f"{base_text}\n{result.message_hint}"
             return self._apply_catgirl_tone(base_text, style="night")
 
         if result.orphaned and not result.auto_filled:
@@ -178,9 +177,21 @@ class ResponseService:
             return self._apply_catgirl_tone(text, style="orphan")
 
         base_text = self._render_template(self.settings.morning_static_reply, data)
-        if result.message_hint:
-            base_text = f"{base_text}\n{result.message_hint}"
         return self._apply_catgirl_tone(base_text, style="morning")
+
+    @staticmethod
+    def _format_duration_text(duration_minutes: int | None) -> str:
+        if duration_minutes is None:
+            return "-"
+        if duration_minutes < 60:
+            return f"{duration_minutes}分钟"
+
+        hours, minutes = divmod(duration_minutes, 60)
+        if minutes == 0:
+            return f"{hours}小时"
+        if minutes < 5:
+            return f"约{hours}小时"
+        return f"{hours}小时{minutes}分钟"
 
     async def _build_analysis_system_prompt(self, umo: str) -> str:
         base_prompt = (self.settings.llm_prompt_analysis or "").strip()
@@ -251,11 +262,14 @@ class ResponseService:
         if not cleaned:
             cleaned = "收到啦，我会帮你记好作息"
 
+        if not getattr(self.settings, "append_catgirl_extra", True):
+            return cleaned
         if "喵" not in cleaned:
             if cleaned.endswith(("。", "！", "？", ".", "!", "?", "~", "～")):
                 cleaned = f"{cleaned} 喵~"
             else:
                 cleaned = f"{cleaned}，喵~"
+
 
         pool = self._CATGIRL_EXTRAS.get(style) or self._CATGIRL_EXTRAS["default"]
         extra = random.choice(pool)
@@ -291,8 +305,8 @@ class ResponseService:
             f"动作结果：{result.action}\n"
             f"入睡时间：{result.sleep_time or '-'}\n"
             f"醒来时间：{result.wake_time or '-'}\n"
+            f"时长（自然表达）：{self._format_duration_text(result.duration_minutes)}\n"
             f"时长（分钟）：{result.duration_minutes if result.duration_minutes is not None else '-'}\n"
-            f"补充说明：{result.message_hint}\n"
             f"当日相关记录：\n{today_records_text}\n"
             "请结合上述当日记录，仅输出一段中文短回复：1-2句、总字数不超过50字。"
             "不要分点、不要标题、不要代码块、不要换行。"

@@ -40,7 +40,7 @@ def _resolve_plugin_data_dir(plugin_name: str) -> Path:
     "astrbot_plugin_oyasumi",
     "RichardLiu",
     "基于正则触发的早安晚安会话追踪插件，支持统计、修正与个性化分析。",
-    "v1.1.0",
+    "v1.1.1",
 )
 class OyasumiPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig | dict | None = None):

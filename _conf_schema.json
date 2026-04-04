@@ -35,7 +35,7 @@
   "morning_static_reply": {
     "type": "string",
     "description": "早安固定回复模板",
-    "default": "早安呀，{user_name}。你这次睡了约 {duration_minutes} 分钟，要元气满满哦，喵~"
+    "default": "早安呀，{user_name}。你这次睡了 {duration_human}，今天也要元气满满哦，喵~"
   },
   "night_static_reply": {
     "type": "string",
@@ -51,6 +51,12 @@
     "type": "string",
     "description": "重复晚安回复模板",
     "default": "你当前已经有进行中的睡眠记录了，这次按策略处理好啦，喵~"
+  },
+  "append_catgirl_extra": {
+    "type": "bool",
+    "description": "追加猫娘风格句子与喵~后缀",
+    "default": true,
+    "hint": "开启后会在回复后追加“喵~”和随机补充句；关闭则仅使用模板文本"
   },
   "llm_enabled": {
     "type": "bool",
@@ -115,13 +121,31 @@
   },
   "duplicate_night_policy": {
     "type": "string",
-    "description": "重复晚安策略：ignore / update_open / create_new",
-    "default": "ignore"
+    "description": "重复晚安策略",
+    "default": "ignore",
+    "options": [
+      "ignore",
+      "update_open",
+      "create_new"
+    ],
+    "labels": [
+      "忽略重复晚安",
+      "更新当前进行中会话的入睡时间",
+      "新建一条进行中会话"
+    ]
   },
   "orphan_morning_policy": {
     "type": "string",
-    "description": "孤立早安策略：warn_only / create_closed_session",
-    "default": "warn_only"
+    "description": "孤立早安策略",
+    "default": "warn_only",
+    "options": [
+      "warn_only",
+      "create_closed_session"
+    ],
+    "labels": [
+      "仅提示未找到可闭合晚安记录",
+      "自动补全一条已闭合睡眠会话"
+    ]
   },
   "auto_fill_default_hours": {
     "type": "int",
