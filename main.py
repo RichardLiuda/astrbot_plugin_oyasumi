@@ -16,6 +16,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .app.config import PluginSettings, load_plugin_settings
+from .app.duration_utils import format_duration_human
 from .app.repository import OyasumiRepository
 from .app.response_service import ResponseService
 from .app.session_service import SessionService
@@ -331,7 +332,7 @@ class OyasumiPlugin(Star):
             lines.append(
                 f"#{row['id']} | 用户:{row['user_id']} | 状态:{row['status']} | "
                 f"入睡:{row['sleep_time'] or '-'} | 醒来:{row['wake_time'] or '-'} | "
-                f"时长:{row['duration_minutes'] if row['duration_minutes'] is not None else '-'}分钟"
+                f"时长:{format_duration_human(row['duration_minutes'])}"
             )
         yield event.plain_result("\n".join(lines))
 

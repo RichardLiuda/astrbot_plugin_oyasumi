@@ -9,6 +9,7 @@ from astrbot.api import logger
 from astrbot.api.star import Context
 
 from .config import PluginSettings
+from .duration_utils import format_duration_human
 from .session_service import EventProcessResult
 from .trigger_matcher import EVENT_GOOD_NIGHT
 
@@ -155,8 +156,13 @@ class ResponseService:
             "user_name": user_name,
             "sleep_time": result.sleep_time or "-",
             "wake_time": result.wake_time or "-",
-            "duration_human": self._format_duration_text(result.duration_minutes),
+            "duration_human": format_duration_human(result.duration_minutes),
             "duration_minutes": (
+                format_duration_human(result.duration_minutes)
+                if result.duration_minutes is not None
+                else "-"
+            ),
+            "duration_minutes_raw": (
                 str(result.duration_minutes)
                 if result.duration_minutes is not None
                 else "-"
@@ -178,20 +184,6 @@ class ResponseService:
 
         base_text = self._render_template(self.settings.morning_static_reply, data)
         return self._apply_catgirl_tone(base_text, style="morning")
-
-    @staticmethod
-    def _format_duration_text(duration_minutes: int | None) -> str:
-        if duration_minutes is None:
-            return "-"
-        if duration_minutes < 60:
-            return f"{duration_minutes}分钟"
-
-        hours, minutes = divmod(duration_minutes, 60)
-        if minutes == 0:
-            return f"{hours}小时"
-        if minutes < 5:
-            return f"约{hours}小时"
-        return f"{hours}小时{minutes}分钟"
 
     async def _build_analysis_system_prompt(self, umo: str) -> str:
         base_prompt = (self.settings.llm_prompt_analysis or "").strip()
@@ -305,7 +297,7 @@ class ResponseService:
             f"动作结果：{result.action}\n"
             f"入睡时间：{result.sleep_time or '-'}\n"
             f"醒来时间：{result.wake_time or '-'}\n"
-            f"时长（自然表达）：{self._format_duration_text(result.duration_minutes)}\n"
+            f"时长（自然表达）：{format_duration_human(result.duration_minutes)}\n"
             f"时长（分钟）：{result.duration_minutes if result.duration_minutes is not None else '-'}\n"
             f"当日相关记录：\n{today_records_text}\n"
             "请结合上述当日记录，仅输出一段中文短回复：1-2句、总字数不超过50字。"

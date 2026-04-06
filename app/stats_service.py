@@ -5,6 +5,7 @@ from datetime import date, datetime, timedelta
 from typing import Any
 
 from .config import PluginSettings
+from .duration_utils import format_duration_human
 from .repository import OyasumiRepository
 
 
@@ -30,8 +31,8 @@ class StatsSummary:
             f"统计对象：{user_label}",
             f"统计区间：{self.start_date} ~ {self.end_date}",
             f"闭合会话数：{self.total_sessions}",
-            f"总睡眠时长：{self.total_sleep_minutes} 分钟",
-            f"平均睡眠时长：{self.avg_sleep_minutes} 分钟",
+            f"总睡眠时长：{format_duration_human(self.total_sleep_minutes)}",
+            f"平均睡眠时长：{format_duration_human(self.avg_sleep_minutes)}",
             f"最早入睡：{self.earliest_sleep_time or '-'}",
             f"最晚入睡：{self.latest_sleep_time or '-'}",
             f"最早醒来：{self.earliest_wake_time or '-'}",
@@ -47,7 +48,7 @@ class StatsSummary:
         for row in self.records[:include_records_limit]:
             lines.append(
                 f"- #{row['id']} | 日期:{row['stat_date']} | 入睡:{row['sleep_time']} | "
-                f"醒来:{row['wake_time']} | 时长:{row['duration_minutes']}分钟"
+                f"醒来:{row['wake_time']} | 时长:{format_duration_human(int(row['duration_minutes'] or 0))}"
             )
         return "\n".join(lines)
 
