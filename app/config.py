@@ -25,6 +25,7 @@ class PluginSettings:
     night_static_reply: str
     orphan_morning_reply: str
     duplicate_night_reply: str
+    append_catgirl_extra: bool
     llm_enabled: bool
     llm_provider_id: str | None
     llm_analysis_provider_id: str | None
@@ -191,7 +192,7 @@ def load_plugin_settings(
         normalize_width=_as_bool(raw.get("normalize_width"), True),
         morning_static_reply=_as_str(
             raw.get("morning_static_reply"),
-            "早安呀，{user_name}。你这次睡了约 {duration_minutes} 分钟，要元气满满哦，喵~",
+            "早安呀，{user_name}。你这次睡了 {duration_human}，今天也要元气满满哦，喵~",
         ),
         night_static_reply=_as_str(
             raw.get("night_static_reply"),
@@ -205,6 +206,7 @@ def load_plugin_settings(
             raw.get("duplicate_night_reply"),
             "你当前已经有进行中的睡眠记录了，这次按策略处理好啦，喵~",
         ),
+        append_catgirl_extra=_as_bool(raw.get("append_catgirl_extra"), True),
         llm_enabled=_as_bool(raw.get("llm_enabled"), False),
         llm_provider_id=llm_provider_id,
         llm_analysis_provider_id=llm_analysis_provider_id,

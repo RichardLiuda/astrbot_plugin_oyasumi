@@ -18,7 +18,7 @@ class EventProcessResult:
     sleep_time: str | None
     wake_time: str | None
     duration_minutes: int | None
-    message_hint: str
+    internal_note: str
     orphaned: bool = False
     auto_filled: bool = False
     open_session_count: int = 0
@@ -72,7 +72,7 @@ class SessionService:
             )
             action = "night_open_created"
             event_status = "processed"
-            message_hint = "晚安事件已记录。"
+            internal_note = "晚安事件已记录。"
             session_id: int | None = None
 
             if open_session is None:
@@ -89,7 +89,7 @@ class SessionService:
                 if policy == "ignore":
                     action = "night_duplicate_ignored"
                     event_status = "ignored"
-                    message_hint = "检测到重复晚安，本次未创建新会话。"
+                    internal_note = "检测到重复晚安，本次未创建新会话。"
                     sleep_time = str(open_session.get("sleep_time") or "")
                 elif policy == "update_open":
                     await self.repository.update_open_session_sleep_time(
@@ -98,7 +98,7 @@ class SessionService:
                         conn=conn,
                     )
                     action = "night_duplicate_updated_open"
-                    message_hint = "检测到重复晚安，已更新进行中会话的入睡时间。"
+                    internal_note = "检测到重复晚安，已更新进行中会话的入睡时间。"
                     sleep_time = format_dt(event_time)
                 else:
                     session_id = await self.repository.create_open_session(
@@ -108,7 +108,7 @@ class SessionService:
                         conn=conn,
                     )
                     action = "night_duplicate_created_new"
-                    message_hint = "检测到重复晚安，已按策略新建进行中会话。"
+                    internal_note = "检测到重复晚安，已按策略新建进行中会话。"
                     sleep_time = format_dt(event_time)
 
             event_id = await self.repository.insert_event(
@@ -134,7 +134,7 @@ class SessionService:
             sleep_time=sleep_time,
             wake_time=None,
             duration_minutes=None,
-            message_hint=message_hint,
+            internal_note=internal_note,
             orphaned=False,
             auto_filled=False,
             open_session_count=open_session_count,
@@ -163,7 +163,7 @@ class SessionService:
             session_id: int | None = None
             action = "morning_orphan_warning"
             event_status = "orphan"
-            message_hint = "已记录早安事件，但没有可闭合的晚安会话。"
+            internal_note = "已记录早安事件，但没有可闭合的晚安会话。"
             sleep_time: str | None = None
             wake_time: str | None = None
             duration_minutes: int | None = None
@@ -182,7 +182,7 @@ class SessionService:
                 )
                 action = "morning_closed_session"
                 event_status = "processed"
-                message_hint = "早安事件已记录，已闭合最近进行中会话。"
+                internal_note = "早安事件已记录，已闭合最近进行中会话。"
                 sleep_time = format_dt(sleep_dt)
                 wake_time = format_dt(safe_wake_dt)
                 duration_minutes = max(
@@ -207,7 +207,7 @@ class SessionService:
                     )
                     action = "morning_auto_filled_session"
                     event_status = "auto_filled"
-                    message_hint = "未找到进行中会话，已按策略自动补全一条睡眠会话。"
+                    internal_note = "未找到进行中会话，已按策略自动补全一条睡眠会话。"
                     sleep_time = format_dt(sleep_dt)
                     wake_time = format_dt(event_time)
                     duration_minutes = int(
@@ -239,7 +239,7 @@ class SessionService:
             sleep_time=sleep_time,
             wake_time=wake_time,
             duration_minutes=duration_minutes,
-            message_hint=message_hint,
+            internal_note=internal_note,
             orphaned=orphaned,
             auto_filled=auto_filled,
             open_session_count=open_session_count,
